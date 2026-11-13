@@ -44,6 +44,36 @@ export function setCell(data: Data, seriesIndex: number, i: number, value: numbe
   s.provenance[i] = value === null ? "MISSING" : "USER_INPUT";
 }
 
+/** Provenance values that still need a human look. USER_INPUT (typed or confirmed) is verified; MISSING is just empty. */
+const UNVERIFIED: ReadonlySet<string> = new Set(["PARSED", "OCR_EXACT", "AXIS_MEASURED", "LOW_CONFIDENCE"]);
+
+export function isUnverified(p: string | undefined): boolean {
+  return p !== undefined && UNVERIFIED.has(p);
+}
+
+/** Mark one cell as checked by the user. No-op for empty or already-verified cells. */
+export function confirmCell(data: Data, seriesIndex: number, i: number): void {
+  const s = data.series[seriesIndex];
+  if (s && isUnverified(s.provenance[i])) s.provenance[i] = "USER_INPUT";
+}
+
+/** Confirm every unverified cell in one series, or in all series when seriesIndex is omitted. */
+export function confirmAll(data: Data, seriesIndex?: number): void {
+  data.series.forEach((s, si) => {
+    if (seriesIndex !== undefined && si !== seriesIndex) return;
+    for (let i = 0; i < s.provenance.length; i++) if (isUnverified(s.provenance[i])) s.provenance[i] = "USER_INPUT";
+  });
+}
+
+export function unverifiedCount(data: Data, seriesIndex?: number): number {
+  let n = 0;
+  data.series.forEach((s, si) => {
+    if (seriesIndex !== undefined && si !== seriesIndex) return;
+    for (const p of s.provenance) if (isUnverified(p)) n++;
+  });
+  return n;
+}
+
 export function addRow(data: Data): void {
   data.labels.push(`Item ${data.labels.length + 1}`);
   for (const s of data.series) {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, X, Zap } from "lucide-react";
+import { unverifiedCount } from "../../model/dataOps";
 import { useDocumentStore } from "../../store/documentStore";
 import { useUiStore } from "../../store/uiStore";
 import type { Backdrop } from "../../store/uiStore";
@@ -39,6 +40,7 @@ function Segmented<T extends string | number>({ label, value, options, onChange 
 
 export function FlightCheckModal() {
   const doc = useDocumentStore((s) => s.doc);
+  const unverified = unverifiedCount(doc.data);
   const { exportFormat: format, exportScale: scale, exportFps: fps, backdrop, safeZone: platform, loop, setLoop, setExport, setFlightCheckOpen } = useUiStore();
   const [preview, setPreview] = useState<{ blob: Blob; url: string } | null>(null);
   const [busy, setBusy] = useState(true);
@@ -203,6 +205,12 @@ export function FlightCheckModal() {
               <X size={18} />
             </button>
           </div>
+
+          {unverified > 0 && (
+            <div role="status" className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              {unverified} unverified value{unverified === 1 ? "" : "s"} (imported or estimated). You can still export; check the Data Table first if accuracy matters.
+            </div>
+          )}
 
           <Segmented<ExportFormat>
             label="Format"

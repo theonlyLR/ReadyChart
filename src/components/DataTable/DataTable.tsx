@@ -1,6 +1,6 @@
-import { Plus, X } from "lucide-react";
+import { Check, Plus, X } from "lucide-react";
 import type { CellProvenance } from "../../model/types";
-import { addRow, addSeries, parseCellNumber, removeRow, removeSeries, setCell, setLabel, setSeriesName, setSliceColor } from "../../model/dataOps";
+import { addRow, addSeries, confirmAll, confirmCell, isUnverified, parseCellNumber, unverifiedCount, removeRow, removeSeries, setCell, setLabel, setSeriesName, setSliceColor } from "../../model/dataOps";
 import { SERIES_PALETTE } from "../../model/defaults";
 import { useDocumentStore } from "../../store/documentStore";
 import { CommitInput } from "../CommitInput";
@@ -8,10 +8,20 @@ import { ColorField } from "../Inspector/fields";
 
 const TINT: Record<CellProvenance, string> = {
   USER_INPUT: "",
+  PARSED: "bg-sky-50",
   OCR_EXACT: "bg-emerald-50",
-  AXIS_MEASURED: "bg-sky-50",
+  AXIS_MEASURED: "bg-violet-100",
   LOW_CONFIDENCE: "bg-amber-100",
   MISSING: "bg-rose-50",
+};
+
+const HINT: Record<CellProvenance, string> = {
+  USER_INPUT: "Entered or confirmed by you",
+  PARSED: "Parsed from pasted text. Check it, then confirm",
+  OCR_EXACT: "Read from a printed label in the screenshot. Check it",
+  AXIS_MEASURED: "Estimated from pixel positions. Check it",
+  LOW_CONFIDENCE: "Low-confidence extraction. Check it",
+  MISSING: "Missing",
 };
 
 const cell = "w-full min-w-0 rounded border border-transparent bg-transparent px-1.5 py-1 text-sm hover:border-slate-200 focus:border-indigo-400 focus:bg-white focus:outline-none";
@@ -19,12 +29,22 @@ const cell = "w-full min-w-0 rounded border border-transparent bg-transparent px
 export function DataTable() {
   const data = useDocumentStore((s) => s.doc.data);
   const update = useDocumentStore((s) => s.update);
-  const radial = useDocumentStore((s) => s.doc.geometry.type === "pie" || s.doc.geometry.type === "donut");
+  const unverified = unverifiedCount(data);
+  const radial =useDocumentStore((s) => s.doc.geometry.type === "pie" || s.doc.geometry.type === "donut");
 
   return (
     <section className="p-3">
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Data</h2>
+        {unverified > 0 && (
+          <button
+            className="ml-auto mr-2 rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-200"
+            title="Mark every imported value as checked"
+            onClick={() => update((d) => confirmAll(d.data))}
+          >
+            {unverified} unverified · Confirm all
+          </button>
+        )}
         <button className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50" onClick={() => update((d) => addSeries(d.data))}>
           <Plus size={14} /> Series
         </button>
@@ -72,7 +92,7 @@ export function DataTable() {
                 </div>
               </td>
               {data.series.map((s, si) => (
-                <td key={s.id} className={TINT[s.provenance[i] ?? "USER_INPUT"]} title={s.provenance[i]}>
+                <td key={s.id} className={`relative ${TINT[s.provenance[i] ?? "USER_INPUT"]}`} title={HINT[s.provenance[i] ?? "USER_INPUT"]}>
                   <CommitInput
                     ariaLabel={`${s.name} ${label}`}
                     inputMode="decimal"
@@ -84,6 +104,16 @@ export function DataTable() {
                       if (parsed !== undefined) update((d) => setCell(d.data, si, i, parsed));
                     }}
                   />
+                  {isUnverified(s.provenance[i]) && (
+                    <button
+                      aria-label={`Confirm ${s.name} ${label}`}
+                      title="Confirm this value"
+                      className="absolute right-0.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:bg-white hover:text-emerald-600"
+                      onClick={() => update((d) => confirmCell(d.data, si, i))}
+                    >
+                      <Check size={12} />
+                    </button>
+                  )}
                 </td>
               ))}
               <td>
@@ -101,7 +131,7 @@ export function DataTable() {
       <button className="mt-2 inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50" onClick={() => update((d) => addRow(d.data))}>
         <Plus size={14} /> Row
       </button>
-      <p className="mt-4 text-xs leading-relaxed text-slate-400">Enter or click away to commit. Empty cells are treated as missing; cell tint shows data provenance.</p>
+      <p className="mt-4 text-xs leading-relaxed text-slate-400">Enter or click away to commit. Empty cells are treated as missing. Tinted cells are imported or estimated values you haven't verified yet; editing or confirming one clears its tint.</p>
     </section>
   );
 }

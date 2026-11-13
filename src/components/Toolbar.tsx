@@ -1,4 +1,4 @@
-import { Download, Redo2, Undo2 } from "lucide-react";
+import { ClipboardPaste, Download, Redo2, Undo2 } from "lucide-react";
 import {
   HIGH_DENSITY_COLLISION_FIXTURE,
   MICRO_SLICE_PIE_FIXTURE,
@@ -38,6 +38,7 @@ export function Toolbar() {
   const canRedo = useDocumentStore((s) => s.future.length > 0);
   const { update, undo, redo, replaceDoc } = useDocumentStore.getState();
   const setFlightCheckOpen = useUiStore((s) => s.setFlightCheckOpen);
+  const openImport = useUiStore((s) => s.openImport);
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-3">
@@ -77,6 +78,9 @@ export function Toolbar() {
           <option key={k}>{k}</option>
         ))}
       </select>
+      <button className={btn} onClick={() => openImport("text")} title="Paste data or a chart screenshot (⌘V)">
+        <ClipboardPaste size={16} /> Import
+      </button>
       <div className="flex-1" />
       <button
         className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"

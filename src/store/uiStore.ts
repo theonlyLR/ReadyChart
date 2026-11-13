@@ -9,6 +9,13 @@ export type Backdrop = "checker" | "dark" | "white";
 interface UiState {
   flightCheckOpen: boolean;
   setFlightCheckOpen: (open: boolean) => void;
+  /** Import Data modal (ephemeral chrome). `importTab` picks the tab it opens on. */
+  importOpen: boolean;
+  importTab: "text" | "screenshot";
+  /** Text or image waiting to be loaded into the Import modal (from ⌘V or drag/drop). Throwaway input, never chart state. */
+  importSeed: { text?: string; image?: Blob } | null;
+  openImport: (tab: "text" | "screenshot", seed?: { text?: string; image?: Blob }) => void;
+  closeImport: () => void;
   /** Flips true once Inter is loaded, so layout re-measures with real glyph widths. */
   fontsReady: boolean;
   /** Bumped whenever another brand font finishes loading, so layout re-measures. */
@@ -35,6 +42,11 @@ interface UiState {
 export const useUiStore = create<UiState>((set) => ({
   flightCheckOpen: false,
   setFlightCheckOpen: (flightCheckOpen) => set({ flightCheckOpen }),
+  importOpen: false,
+  importTab: "text",
+  importSeed: null,
+  openImport: (importTab, seed) => set({ importOpen: true, importTab, importSeed: seed ?? null }),
+  closeImport: () => set({ importOpen: false, importSeed: null }),
   fontsReady: false,
   fontsVersion: 0,
   editingField: null,

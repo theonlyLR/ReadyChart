@@ -24,7 +24,29 @@ export function useKeyboardShortcuts(): void {
       else return;
       e.preventDefault();
     };
+    // ⌘V outside a text field: an image opens Screenshot import, text opens Paste import.
+    const onPaste = (e: ClipboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.isContentEditable)) return;
+      const ui = useUiStore.getState();
+      if (ui.flightCheckOpen) return;
+      const image = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith("image/"));
+      if (image) {
+        e.preventDefault();
+        ui.openImport("screenshot", { image });
+        return;
+      }
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      if (text.trim() !== "" && !ui.importOpen) {
+        e.preventDefault();
+        ui.openImport("text", { text });
+      }
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("paste", onPaste);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("paste", onPaste);
+    };
   }, []);
 }
