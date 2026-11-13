@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { validateExtraction } from "../../vision/VisionProvider";
 import { boundsToRect } from "./crop";
 import { deriveDesign } from "./design";
-import { buildLocalExtraction } from "./localScan";
+import { OCR_BUDGET_MS, buildLocalExtraction, withBudget } from "./localScan";
 import type { OcrLine } from "./localScan";
 import { chartRegion, detectBars, estimateBackground } from "./barDetect";
 
@@ -113,5 +113,26 @@ describe("buildLocalExtraction", () => {
   });
   it("returns null when there is no bar chart", () => {
     expect(buildLocalExtraction(paint(300, 200, BG, []), [])).toBeNull();
+  });
+});
+
+describe("withBudget (OCR never blocks the scan)", () => {
+  it("returns the fallback when the work is slower than the budget", async () => {
+    const slow = new Promise<string>((r) => setTimeout(() => r("late"), 200));
+    const started = Date.now();
+    expect(await withBudget(slow, 30, "fallback")).toBe("fallback");
+    expect(Date.now() - started).toBeLessThan(150);
+  });
+  it("returns the work's result when it finishes in time", async () => {
+    expect(await withBudget(Promise.resolve("done"), 500, "fallback")).toBe("done");
+  });
+  it("propagates the work's own failure when it fails in time, and ignores one that fails after the budget", async () => {
+    await expect(withBudget(Promise.reject(new Error("boom")), 500, "x")).rejects.toThrow("boom");
+    const lateFail = new Promise<string>((_, rej) => setTimeout(() => rej(new Error("late")), 60));
+    expect(await withBudget(lateFail, 10, "fallback")).toBe("fallback");
+    await new Promise((r) => setTimeout(r, 100)); // no unhandled rejection
+  });
+  it("has a budget short enough to sit well inside the 12 s cloud guardrail", () => {
+    expect(OCR_BUDGET_MS).toBeLessThanOrEqual(5000);
   });
 });

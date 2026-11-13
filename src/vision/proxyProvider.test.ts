@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createProxyProvider, probeProxy } from "./proxyProvider";
+import { PROBE_TIMEOUT_MS, SCAN_TIMEOUT_MS, createProxyProvider, probeProxy } from "./proxyProvider";
 import { VisionError } from "./prompt";
 
 const img = new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" });
@@ -45,6 +45,20 @@ describe("createProxyProvider", () => {
       throw new DOMException("Aborted", "AbortError");
     });
     await expect(createProxyProvider(() => ({}), f as unknown as typeof fetch).extractChart(img, hints, ac.signal)).rejects.toMatchObject({ name: "AbortError" });
-    expect((f.mock.calls[0] as [string, RequestInit])[1].signal).toBe(ac.signal);
+    // the fetch gets a derived signal (user signal + deadline), so Cancel must still propagate into it
+    const sent = (f.mock.calls[0] as [string, RequestInit])[1].signal!;
+    expect(sent.aborted).toBe(true);
+  });
+  it("times out a stalled scan with a plain 'timeout' error so the fallback can take over", async () => {
+    const f = vi.fn().mockImplementation((_u: string, i: RequestInit) => new Promise((_, reject) => i.signal!.addEventListener("abort", () => reject(i.signal!.reason), { once: true })));
+    const started = Date.now();
+    const err = await createProxyProvider(() => ({}), f as unknown as typeof fetch, 30).extractChart(img, hints).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(VisionError);
+    expect(err).toMatchObject({ code: "timeout" });
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+  it("defaults to a 12 s guardrail and a short probe", () => {
+    expect(SCAN_TIMEOUT_MS).toBe(12000);
+    expect(PROBE_TIMEOUT_MS).toBeLessThan(SCAN_TIMEOUT_MS);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { GEMINI_MODELS, cachedGeminiRoute, configuredProvider, handleScan, resetGeminiRoutes, resolveCredentials } from "./scanProxy.ts";
+import { GEMINI_MODELS, GEMINI_TIMEOUT_MS, cachedGeminiModel, configuredProvider, handleScan, resetGeminiRoutes, resolveCredentials } from "./scanProxy.ts";
 
 const body = JSON.stringify({ image: "AAAA", mimeType: "image/png", hints: { width: 10, height: 10, colors: ["#112233"] } });
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
@@ -41,60 +41,90 @@ describe("handleScan", () => {
     expect(String(f.mock.calls[0]![0])).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent");
     expect((f.mock.calls[0]![1] as RequestInit).headers).toMatchObject({ "x-goog-api-key": "g-secret" });
   });
-  describe("Gemini self-healing cascade", () => {
+  describe("Gemini fast failover", () => {
     const ok = () => json({ candidates: [{ content: { parts: [{ text: JSON.stringify(REPLY) }] } }] });
     const err = (status: number, message = "boom") => json({ error: { code: status, message } }, status);
-    const KEY = "AQ.abc123";
-    const run = (f: ReturnType<typeof vi.fn>, env: Record<string, string> = { GEMINI_API_KEY: KEY }) => handleScan({ body, headers: {} }, env, f as unknown as typeof fetch);
-    const url = (f: ReturnType<typeof vi.fn>, i: number) => String(f.mock.calls[i]![0]);
-    const init = (f: ReturnType<typeof vi.fn>, i: number) => f.mock.calls[i]![1] as RequestInit;
+    const KEYS = ["AIzaSyExample123", "AQ.abc123"];
     const AI = (m: string) => `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
-    const VX = (m: string) => `https://aiplatform.googleapis.com/v1/publishers/google/models/${m}:generateContent`;
     const quiet = () => {
       resetGeminiRoutes();
       return vi.spyOn(console, "error").mockImplementation(() => {});
     };
+    const run = (f: ReturnType<typeof vi.fn>, key = KEYS[0]!, extra: Record<string, string> = {}, timeoutMs?: number) =>
+      handleScan({ body, headers: {} }, { GEMINI_API_KEY: key, ...extra }, f as unknown as typeof fetch, undefined, { timeoutMs });
+    const urls = (f: ReturnType<typeof vi.fn>) => f.mock.calls.map((c) => String(c[0]));
+    const init = (f: ReturnType<typeof vi.fn>, i: number) => f.mock.calls[i]![1] as RequestInit;
 
-    it("uses the evergreen priority list by default", () => {
-      expect([...GEMINI_MODELS]).toEqual(["gemini-flash-latest", "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-flash-lite-latest"]);
+    it("fails over fast models first: flash-latest, flash-lite, 3.8, 3.6", () => {
+      expect([...GEMINI_MODELS]).toEqual(["gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.6-flash"]);
     });
-    it("sends clean Gemini 3.x config with the header on both endpoints, never a key in the URL", async () => {
+    it.each(KEYS)("never calls aiplatform.googleapis.com, whatever the key prefix (%s)", async (key) => {
       const e = quiet();
-      const f = vi.fn().mockResolvedValueOnce(err(403)).mockResolvedValueOnce(ok());
-      await run(f);
-      expect(url(f, 0)).toBe(AI("gemini-flash-latest"));
-      expect(url(f, 1)).toBe(VX("gemini-flash-latest"));
-      for (const i of [0, 1]) {
-        expect(init(f, i).headers).toMatchObject({ "x-goog-api-key": KEY });
-        expect(url(f, i)).not.toContain(KEY);
-        const cfg = JSON.parse(String(init(f, i).body)).generationConfig;
-        expect(cfg).toEqual({ responseMimeType: "application/json", thinkingConfig: { thinkingLevel: "low" } });
+      const f = vi.fn().mockResolvedValue(err(503));
+      await run(f, key);
+      expect(urls(f)).toEqual(GEMINI_MODELS.map(AI)); // one attempt per model, one endpoint
+      expect(urls(f).some((u) => u.includes("aiplatform"))).toBe(false);
+      for (let i = 0; i < f.mock.calls.length; i++) {
+        expect(init(f, i).headers).toMatchObject({ "x-goog-api-key": key });
+        expect(urls(f)[i]).not.toContain(key);
       }
       e.mockRestore();
     });
-    it("walks endpoints then models until one returns 200, and caches that route", async () => {
+    it("sends clean Gemini 3.x config", async () => {
       const e = quiet();
-      const f = vi.fn().mockImplementation(async (u: string) => (u === VX("gemini-3.6-flash") ? ok() : err(404, "model not found")));
-      expect(await run(f)).toEqual({ status: 200, body: { provider: "gemini", extraction: REPLY } });
-      expect(f.mock.calls.map((c) => String(c[0]))).toEqual([AI("gemini-flash-latest"), VX("gemini-flash-latest"), AI("gemini-3.8-flash"), VX("gemini-3.8-flash"), AI("gemini-3.6-flash"), VX("gemini-3.6-flash")]);
-      expect(cachedGeminiRoute(KEY)).toEqual({ endpoint: "vertex", model: "gemini-3.6-flash" });
+      const f = vi.fn().mockResolvedValue(ok());
+      await run(f);
+      expect(JSON.parse(String(init(f, 0).body)).generationConfig).toEqual({ responseMimeType: "application/json", thinkingConfig: { thinkingLevel: "low" } });
       e.mockRestore();
     });
-    it("the cached route makes the next scan succeed on the first try", async () => {
+    it("attaches an 8 s deadline signal to every attempt", async () => {
       const e = quiet();
-      await run(vi.fn().mockImplementation(async (u: string) => (u === VX("gemini-3.6-flash") ? ok() : err(404))));
+      const f = vi.fn().mockResolvedValue(err(503));
+      await run(f);
+      for (let i = 0; i < f.mock.calls.length; i++) expect(init(f, i).signal).toBeInstanceOf(AbortSignal);
+      expect(GEMINI_TIMEOUT_MS).toBe(8000);
+      e.mockRestore();
+    });
+    it("a stalled model is aborted by its deadline and the next model answers", async () => {
+      const e = quiet();
+      const f = vi.fn().mockImplementation((u: string, i: RequestInit) =>
+        u === AI("gemini-flash-latest")
+          ? new Promise((_, reject) => i.signal!.addEventListener("abort", () => reject(i.signal!.reason), { once: true })) // hangs until aborted
+          : Promise.resolve(ok()),
+      );
+      const started = Date.now();
+      expect((await run(f, KEYS[0], {}, 40)).status).toBe(200);
+      expect(Date.now() - started).toBeLessThan(1000);
+      expect(urls(f)).toEqual([AI("gemini-flash-latest"), AI("gemini-3.5-flash-lite")]);
+      expect(cachedGeminiModel(KEYS[0]!)).toBe("gemini-3.5-flash-lite");
+      expect(e.mock.calls.some((c) => String(c[0]).includes("timed out"))).toBe(true);
+      e.mockRestore();
+    });
+    it("the user's Cancel still aborts instead of failing over", async () => {
+      const e = quiet();
+      const ac = new AbortController();
+      const f = vi.fn().mockImplementation((_u: string, i: RequestInit) => new Promise((_, reject) => i.signal!.addEventListener("abort", () => reject(i.signal!.reason), { once: true })));
+      const p = handleScan({ body, headers: {} }, { GEMINI_API_KEY: KEYS[0] }, f as unknown as typeof fetch, ac.signal);
+      ac.abort();
+      await p; // the response is discarded by the server once the client is gone; what matters is no further attempts
+      expect(f).toHaveBeenCalledTimes(1);
+      e.mockRestore();
+    });
+    it("caches the first model that returns 200 and tries it first next time", async () => {
+      const e = quiet();
+      await run(vi.fn().mockImplementation(async (u: string) => (u === AI("gemini-3.8-flash") ? ok() : err(404, "model not found"))));
+      expect(cachedGeminiModel(KEYS[0]!)).toBe("gemini-3.8-flash");
       const f = vi.fn().mockResolvedValue(ok());
       expect((await run(f)).status).toBe(200);
-      expect(f).toHaveBeenCalledTimes(1);
-      expect(url(f, 0)).toBe(VX("gemini-3.6-flash"));
+      expect(urls(f)).toEqual([AI("gemini-3.8-flash")]);
       e.mockRestore();
     });
-    it("heals a stale cached route by dropping it and re-running the cascade", async () => {
+    it("drops a stale cached model and heals through the list", async () => {
       const e = quiet();
-      await run(vi.fn().mockResolvedValue(ok())); // caches AI Studio + flash-latest
-      const f = vi.fn().mockImplementation(async (u: string) => (u === AI("gemini-flash-latest") ? err(404, "deprecated") : u === AI("gemini-3.8-flash") ? ok() : err(404)));
+      await run(vi.fn().mockResolvedValue(ok())); // caches flash-latest
+      const f = vi.fn().mockImplementation(async (u: string) => (u === AI("gemini-3.5-flash-lite") ? ok() : err(404, "deprecated")));
       expect((await run(f)).status).toBe(200);
-      expect(cachedGeminiRoute(KEY)).toEqual({ endpoint: "studio", model: "gemini-3.8-flash" });
+      expect(cachedGeminiModel(KEYS[0]!)).toBe("gemini-3.5-flash-lite");
       e.mockRestore();
     });
     it("rides out transient 429, 5xx and network errors", async () => {
@@ -104,40 +134,38 @@ describe("handleScan", () => {
       expect(f).toHaveBeenCalledTimes(4);
       e.mockRestore();
     });
-    it("GEMINI_MODEL pins a single model and replaces the list", async () => {
+    it("GEMINI_MODEL pins a single model", async () => {
       const e = quiet();
       const f = vi.fn().mockResolvedValue(err(404));
-      await run(f, { GEMINI_API_KEY: KEY, GEMINI_MODEL: "my-model" });
-      expect(f.mock.calls.map((c) => String(c[0]))).toEqual([AI("my-model"), VX("my-model")]);
+      await run(f, KEYS[0], { GEMINI_MODEL: "my-model" });
+      expect(urls(f)).toEqual([AI("my-model")]);
       e.mockRestore();
     });
-    it("stops early when the key itself is bad (401 on both endpoints, or API_KEY_INVALID)", async () => {
+    it("stops at once when the key itself is bad (401 or API_KEY_INVALID)", async () => {
       const e = quiet();
       const f = vi.fn().mockResolvedValue(err(401));
       expect(await run(f)).toMatchObject({ status: 401, body: { error: { code: "bad_key" } } });
-      expect(f).toHaveBeenCalledTimes(2);
+      expect(f).toHaveBeenCalledTimes(1);
       resetGeminiRoutes();
       const g = vi.fn().mockResolvedValue(json({ error: { message: "API key not valid. Please pass a valid API key." } }, 400));
       expect(await run(g)).toMatchObject({ status: 401, body: { error: { code: "bad_key" } } });
       expect(g).toHaveBeenCalledTimes(1);
       e.mockRestore();
     });
-    it("reports upstream/rate_limited only after every route failed", async () => {
+    it("reports rate_limited / upstream only after every model failed", async () => {
       const e = quiet();
-      const f = vi.fn().mockResolvedValue(err(429));
-      expect(await run(f)).toMatchObject({ status: 429, body: { error: { code: "rate_limited" } } });
-      expect(f).toHaveBeenCalledTimes(GEMINI_MODELS.length * 2);
+      expect(await run(vi.fn().mockResolvedValue(err(429)))).toMatchObject({ status: 429, body: { error: { code: "rate_limited" } } });
       resetGeminiRoutes();
       expect(await run(vi.fn().mockRejectedValue(new TypeError("offline")))).toMatchObject({ status: 502, body: { error: { code: "upstream" } } });
       e.mockRestore();
     });
     it("logs each failed attempt's status and Google message to stderr, never the key", async () => {
       const e = quiet();
-      await run(vi.fn().mockResolvedValueOnce(err(404, "models/gemini-flash-latest is not found")).mockResolvedValueOnce(ok()));
+      await run(vi.fn().mockResolvedValueOnce(err(404, "models/gemini-flash-latest is not found")).mockResolvedValueOnce(ok()), KEYS[1]);
       const lines = e.mock.calls.map((c) => String(c[0]));
-      expect(lines.some((l) => l.includes("AI Studio") && l.includes("gemini-flash-latest") && l.includes("HTTP 404") && l.includes("is not found"))).toBe(true);
-      expect(lines.some((l) => l.includes("route cached") && l.includes("Vertex AI Express"))).toBe(true);
-      expect(lines.join("\n")).not.toContain(KEY);
+      expect(lines.some((l) => l.includes("gemini-flash-latest") && l.includes("HTTP 404") && l.includes("is not found"))).toBe(true);
+      expect(lines.some((l) => l.includes("model cached") && l.includes("gemini-3.5-flash-lite"))).toBe(true);
+      expect(lines.join("\n")).not.toContain(KEYS[1]);
       e.mockRestore();
     });
   });

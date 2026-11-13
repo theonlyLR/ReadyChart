@@ -8,7 +8,7 @@ import { playReveal } from "../hooks/usePlayback";
 import { useDocumentStore } from "../store/documentStore";
 import { IDLE_SCAN, NO_COMPARE, useUiStore } from "../store/uiStore";
 import { loadScreenshot } from "./image/loadImage";
-import { createLocalProvider } from "./image/localScan";
+import { createLocalProvider, warmOcr } from "./image/localScan";
 import { ScanError, scanChart } from "./image/scanChart";
 import type { ScanResult } from "./image/scanTypes";
 import { loadSampleExtraction } from "./sample";
@@ -64,6 +64,7 @@ async function pickRemote(): Promise<VisionProvider | null> {
 /** Remote vision when available; any failure (or no remote at all) falls through to the on-device scan. Never a dead end. */
 async function pickProvider(signal: AbortSignal): Promise<VisionProvider> {
   const local = createLocalProvider();
+  warmOcr(); // fetch the OCR engine in the background now, so a fallback never waits on the CDN
   const markLocal = () => useUiStore.getState().setScan({ local: true });
   const remote = await pickRemote();
   signal.throwIfAborted();

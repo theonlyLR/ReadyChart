@@ -27,30 +27,57 @@ export interface OcrLine {
 }
 export type OcrFn = (image: Blob, signal?: AbortSignal) => Promise<OcrLine[]>;
 
-/** tesseract.js OCR in a throwaway worker (WASM + English data are fetched on first use, then cached by the browser). */
-export const tesseractOcr: OcrFn = async (image, signal) => {
-  const { createWorker } = await import("tesseract.js");
-  const worker = await createWorker("eng");
-  const stop = () => void worker.terminate();
-  signal?.addEventListener("abort", stop, { once: true });
-  try {
-    const { data } = await worker.recognize(image, {}, { blocks: true });
-    const box = (b: { x0: number; y0: number; x1: number; y1: number }): Box => ({ left: b.x0, top: b.y0, right: b.x1, bottom: b.y1 });
-    return (data.blocks ?? [])
-      .flatMap((b) => b.paragraphs)
-      .flatMap((p) => p.lines)
-      .map((l) => ({
-        text: l.text.trim(),
-        conf: l.confidence / 100,
-        box: box(l.bbox),
-        words: l.words.map((w) => ({ text: w.text.trim(), conf: w.confidence / 100, box: box(w.bbox) })).filter((w) => w.text !== ""),
-      }))
-      .filter((l) => l.text !== "");
-  } finally {
-    signal?.removeEventListener("abort", stop);
-    await worker.terminate().catch(() => {});
-  }
+type TesseractWorker = Awaited<ReturnType<(typeof import("tesseract.js"))["createWorker"]>>;
+
+/**
+ * One shared tesseract.js worker. Its WASM and English data come from a CDN on first use, which can take seconds, so
+ * it is created once, kept alive, and can be warmed in the background while a cloud scan is still running.
+ */
+let workerPromise: Promise<TesseractWorker> | null = null;
+function getWorker(): Promise<TesseractWorker> {
+  workerPromise ??= import("tesseract.js")
+    .then(({ createWorker }) => createWorker("eng"))
+    .catch((e: unknown) => {
+      workerPromise = null; // offline right now: let a later scan try again
+      throw e;
+    });
+  return workerPromise;
+}
+
+/** Start downloading the OCR engine without waiting for it. Safe to call repeatedly. */
+export function warmOcr(): void {
+  getWorker().catch(() => {});
+}
+
+export const tesseractOcr: OcrFn = async (image) => {
+  const worker = await getWorker();
+  const { data } = await worker.recognize(image, {}, { blocks: true });
+  const box = (b: { x0: number; y0: number; x1: number; y1: number }): Box => ({ left: b.x0, top: b.y0, right: b.x1, bottom: b.y1 });
+  return (data.blocks ?? [])
+    .flatMap((b) => b.paragraphs)
+    .flatMap((p) => p.lines)
+    .map((l) => ({
+      text: l.text.trim(),
+      conf: l.confidence / 100,
+      box: box(l.bbox),
+      words: l.words.map((w) => ({ text: w.text.trim(), conf: w.confidence / 100, box: box(w.bbox) })).filter((w) => w.text !== ""),
+    }))
+    .filter((l) => l.text !== "");
 };
+
+/** How long the on-device scan waits for OCR before reading the bars from pixels alone. */
+export const OCR_BUDGET_MS = 4000;
+
+/** Resolve with `fallback` if `work` hasn't finished in `ms` (the work keeps running; its result is just ignored). */
+export function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => resolve(fallback), ms);
+    work.then(
+      (v) => (clearTimeout(t), resolve(v)),
+      (e: unknown) => (clearTimeout(t), reject(e)),
+    );
+  });
+}
 
 const cx = (b: Box): number => (b.left + b.right) / 2;
 const cy = (b: Box): number => (b.top + b.bottom) / 2;
@@ -200,8 +227,8 @@ export function buildLocalExtraction(img: PixelBuffer, lines: OcrLine[]): Record
   };
 }
 
-/** VisionProvider that never leaves the device. OCR trouble (offline, blocked) degrades to pixels-only, never throws. */
-export function createLocalProvider(ocr: OcrFn = tesseractOcr): VisionProvider {
+/** VisionProvider that never leaves the device. OCR trouble (offline, blocked, slow) degrades to pixels-only, never throws. */
+export function createLocalProvider(ocr: OcrFn = tesseractOcr, budgetMs: number = OCR_BUDGET_MS): VisionProvider {
   return {
     name: "On-device",
     async extractChart(image, _hints, signal) {
@@ -209,11 +236,13 @@ export function createLocalProvider(ocr: OcrFn = tesseractOcr): VisionProvider {
       signal?.throwIfAborted();
       let lines: OcrLine[] = [];
       try {
-        lines = await ocr(loaded.blob, signal);
+        // Never block on the CDN: if OCR isn't ready within the budget, read the bars from pixels alone right now.
+        lines = await withBudget(ocr(loaded.blob, signal), budgetMs, [] as OcrLine[]);
       } catch (e) {
         if (signal?.aborted) throw e;
         console.warn("[scan] on-device OCR unavailable; reading bars from pixels only", e);
       }
+      signal?.throwIfAborted();
       const raw = buildLocalExtraction(loaded.pixels, lines);
       if (!raw) throw new VisionError("We couldn't find bars in that screenshot. Try a clearer crop, or paste the numbers with ⌘V.", "no_chart");
       return raw;
