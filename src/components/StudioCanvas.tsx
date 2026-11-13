@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 import { buildScene } from "../engine/scene";
+import { computeFrameState } from "../engine/motion/frameState";
+import { buildTimeline } from "../engine/motion/timeline";
 import { pieGuard } from "../engine/guards";
 import { getMeasurer } from "../render/measurer";
 import { SvgScene } from "../render/SvgScene";
@@ -13,9 +15,14 @@ export function StudioCanvas() {
   const doc = useDocumentStore((s) => s.doc);
   const update = useDocumentStore((s) => s.update);
   const fontsReady = useUiStore((s) => s.fontsReady);
+  const playheadMs = useUiStore((s) => s.playheadMs);
 
   // fontsReady is a deliberate dependency: re-measure once Inter is available.
-  const scene = useMemo(() => buildScene(doc, getMeasurer()), [doc, fontsReady]);
+  const scene = useMemo(() => {
+    // Resting playhead = settled frame, so editing always shows the finished chart.
+    const t = playheadMs ?? (doc.motion.enabled ? buildTimeline(doc).heroEndMs : 0);
+    return buildScene(doc, getMeasurer(), computeFrameState(doc, t));
+  }, [doc, fontsReady, playheadMs]);
   const guard = pieGuard(doc);
   const { width, height, transparent } = doc.canvas;
 

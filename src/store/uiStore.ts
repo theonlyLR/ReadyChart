@@ -13,9 +13,17 @@ interface UiState {
   /** Flight Check export settings. */
   exportFormat: ExportFormat;
   exportScale: number;
+  exportFps: number;
   backdrop: Backdrop;
   safeZone: Platform | null;
-  setExport: (patch: Partial<Pick<UiState, "exportFormat" | "exportScale" | "backdrop" | "safeZone">>) => void;
+  /** Timeline transport (ephemeral). null = resting frame (end of hero, so editing shows the finished chart). */
+  playheadMs: number | null;
+  playing: boolean;
+  loop: boolean;
+  setPlayheadMs: (ms: number | null) => void;
+  setPlaying: (playing: boolean) => void;
+  setLoop: (loop: boolean) => void;
+  setExport: (patch: Partial<Pick<UiState, "exportFormat" | "exportScale" | "exportFps" | "backdrop" | "safeZone">>) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -24,7 +32,14 @@ export const useUiStore = create<UiState>((set) => ({
   fontsReady: false,
   exportFormat: "png",
   exportScale: 2,
+  exportFps: 30,
   backdrop: "checker",
   safeZone: null,
+  playheadMs: null,
+  playing: false,
+  loop: true,
+  setPlayheadMs: (playheadMs) => set({ playheadMs }),
+  setPlaying: (playing) => set({ playing }),
+  setLoop: (loop) => set({ loop }),
   setExport: (patch) => set(patch),
 }));

@@ -9,6 +9,8 @@ import { horizontalAxes, verticalAxes } from "./geometry/axes";
 import { horizontalBarNodes, verticalBarNodes } from "./geometry/bar";
 import { lineNodes } from "./geometry/line";
 import { pieNodes } from "./geometry/pie";
+import type { FrameState } from "./motion/frameState";
+import { FINAL_FRAME } from "./motion/frameState";
 import { roundedRectPath } from "./geometry/roundedRect";
 
 function textBlock(b: TextBlock, fill: string): SceneNode[] {
@@ -25,7 +27,7 @@ function textBlock(b: TextBlock, fill: string): SceneNode[] {
 }
 
 /** doc + layout -> flat, ordered scene. Pure; the only thing renderers consume. */
-export function buildSceneFromLayout(doc: ChartDocument, L: LayoutResult, m: TextMeasurer): SceneNode[] {
+export function buildSceneFromLayout(doc: ChartDocument, L: LayoutResult, m: TextMeasurer, frame: FrameState = FINAL_FRAME): SceneNode[] {
   const theme = themeFor(doc.canvas.background, doc.canvas.transparent);
   const nodes: SceneNode[] = [];
 
@@ -45,18 +47,18 @@ export function buildSceneFromLayout(doc: ChartDocument, L: LayoutResult, m: Tex
     switch (doc.geometry.type) {
       case "bar":
       case "stacked-bar":
-        nodes.push(...verticalAxes(doc, L, theme), ...verticalBarNodes(doc, L, theme, m));
+        nodes.push(...verticalAxes(doc, L, theme, frame), ...verticalBarNodes(doc, L, theme, m, frame));
         break;
       case "horizontal-bar":
-        nodes.push(...horizontalAxes(doc, L, theme), ...horizontalBarNodes(doc, L, theme, m));
+        nodes.push(...horizontalAxes(doc, L, theme, frame), ...horizontalBarNodes(doc, L, theme, m, frame));
         break;
       case "line":
       case "area":
-        nodes.push(...verticalAxes(doc, L, theme), ...lineNodes(doc, L, theme, m));
+        nodes.push(...verticalAxes(doc, L, theme, frame), ...lineNodes(doc, L, theme, m, frame));
         break;
       case "pie":
       case "donut":
-        nodes.push(...pieNodes(doc, L.plot, theme, m, L.u));
+        nodes.push(...pieNodes(doc, L.plot, theme, m, L.u, frame));
         break;
     }
   }
@@ -70,7 +72,7 @@ export function buildSceneFromLayout(doc: ChartDocument, L: LayoutResult, m: Tex
   return nodes;
 }
 
-export function buildScene(doc: ChartDocument, m: TextMeasurer): { layout: LayoutResult; nodes: SceneNode[] } {
+export function buildScene(doc: ChartDocument, m: TextMeasurer, frame: FrameState = FINAL_FRAME): { layout: LayoutResult; nodes: SceneNode[] } {
   const layout = computeLayout(doc, m);
-  return { layout, nodes: buildSceneFromLayout(doc, layout, m) };
+  return { layout, nodes: buildSceneFromLayout(doc, layout, m, frame) };
 }

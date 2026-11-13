@@ -1,7 +1,7 @@
 export function fileNameFor(title: string, format: string, scale: number): string {
   const slug = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "chart";
   const suffix = format === "svg" || scale === 1 ? "" : `@${scale}x`;
-  return `${slug}${suffix}.${format}`;
+  return `${slug}${suffix}.${format === "awebp" ? "webp" : format}`;
 }
 
 export function downloadBlob(blob: Blob, filename: string): void {

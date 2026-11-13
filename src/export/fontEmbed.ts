@@ -22,3 +22,8 @@ export function getEmbeddedFontCss(): Promise<string> {
   ).then((rules) => rules.join(""));
   return cached;
 }
+
+/** Raw WOFF2 bytes for the export worker. Fresh copies each call, because transferring detaches the buffer. */
+export async function getFontBuffers(): Promise<{ weight: number; data: ArrayBuffer }[]> {
+  return Promise.all(([[400, inter400], [600, inter600]] as const).map(async ([weight, url]) => ({ weight, data: await (await fetch(url)).arrayBuffer() })));
+}

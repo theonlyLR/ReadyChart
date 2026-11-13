@@ -3,11 +3,14 @@ import { Toolbar } from "./components/Toolbar";
 import { DataTable } from "./components/DataTable/DataTable";
 import { Inspector } from "./components/Inspector/Inspector";
 import { FlightCheckModal } from "./components/FlightCheck/FlightCheckModal";
+import { TimelineScrubber } from "./components/Timeline/TimelineScrubber";
+import { usePlayback } from "./hooks/usePlayback";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useUiStore } from "./store/uiStore";
 
 export default function App() {
   useKeyboardShortcuts();
+  usePlayback();
   const flightCheckOpen = useUiStore((s) => s.flightCheckOpen);
 
   return (
@@ -17,8 +20,11 @@ export default function App() {
         <aside className="overflow-auto border-r border-slate-200 bg-white">
           <DataTable />
         </aside>
-        <main className="min-w-0 p-6">
-          <StudioCanvas />
+        <main className="flex min-h-0 min-w-0 flex-col">
+          <div className="min-h-0 flex-1 p-6">
+            <StudioCanvas />
+          </div>
+          <TimelineScrubber />
         </main>
         <aside className="overflow-auto border-l border-slate-200 bg-white">
           <Inspector />

@@ -1,6 +1,7 @@
 import { ASPECT_PRESETS } from "../../model/defaults";
 import type { AspectPreset, ChartDocument } from "../../model/types";
 import { parseCellNumber } from "../../model/dataOps";
+import { buildTimeline } from "../../engine/motion/timeline";
 import { useDocumentStore } from "../../store/documentStore";
 import { CommitInput } from "../CommitInput";
 import { ColorField, Section, SelectField, SliderField, TextField, ToggleField } from "./fields";
@@ -36,6 +37,66 @@ function AxisBound({ label, value, onChange }: { label: string; value: number | 
         />
       </div>
     </div>
+  );
+}
+
+const ms = (v: number) => `${v}ms`;
+
+function MotionControls() {
+  const doc = useDocumentStore((s) => s.doc);
+  const update = useDocumentStore((s) => s.update);
+  const m = doc.motion;
+  const set = (recipe: (d: ChartDocument) => void) => update(recipe);
+  return (
+    <>
+      <SelectField
+        label="Physics"
+        value={m.physicsMode}
+        options={[
+          { value: "bezier", label: "Cubic bezier" },
+          { value: "spring", label: "Spring" },
+        ]}
+        onChange={(v) => set((d) => void (d.motion.physicsMode = v))}
+      />
+      {m.physicsMode === "bezier" ? (
+        <>
+          <SliderField label="Duration" value={m.durationMs} min={200} max={4000} step={50} format={ms} onChange={(v) => set((d) => void (d.motion.durationMs = v))} />
+          {(["x1", "y1", "x2", "y2"] as const).map((name, i) => (
+            <SliderField
+              key={name}
+              label={`Easing ${name}`}
+              value={m.easing[i]!}
+              min={i % 2 === 0 ? 0 : -1}
+              max={i % 2 === 0 ? 1 : 2}
+              step={0.01}
+              format={(v) => v.toFixed(2)}
+              onChange={(v) => set((d) => void (d.motion.easing[i] = v))}
+            />
+          ))}
+        </>
+      ) : (
+        <>
+          <SliderField label="Spring stiffness" value={m.springStiffness} min={20} max={600} step={5} onChange={(v) => set((d) => void (d.motion.springStiffness = v))} />
+          <SliderField label="Spring damping" value={m.springDamping} min={2} max={80} step={1} onChange={(v) => set((d) => void (d.motion.springDamping = v))} />
+        </>
+      )}
+      <SelectField
+        label="Stagger order"
+        value={m.staggerDirection}
+        options={[
+          { value: "left-to-right", label: "Left to right" },
+          { value: "center-out", label: "Center out" },
+          { value: "smallest-to-largest", label: "Smallest to largest" },
+        ]}
+        onChange={(v) => set((d) => void (d.motion.staggerDirection = v))}
+      />
+      <SliderField label="Stagger per item" value={m.staggerMs} min={0} max={400} step={5} format={ms} onChange={(v) => set((d) => void (d.motion.staggerMs = v))} />
+      <SliderField label="Max total stagger" value={m.maxTotalStaggerMs} min={0} max={3000} step={50} format={ms} onChange={(v) => set((d) => void (d.motion.maxTotalStaggerMs = v))} />
+      <ToggleField label="Number roll-up" value={m.numberRollUp} onChange={(v) => set((d) => void (d.motion.numberRollUp = v))} />
+      <SliderField label="Readability hold" value={m.holdEndMs} min={0} max={5000} step={100} format={ms} onChange={(v) => set((d) => void (d.motion.holdEndMs = v))} />
+      <SliderField label="Loop reset" value={m.loopResetMs} min={0} max={2000} step={50} format={ms} onChange={(v) => set((d) => void (d.motion.loopResetMs = v))} />
+      <p className="text-xs text-slate-500">Loop length {(buildTimeline(doc).totalMs / 1000).toFixed(2)}s</p>
+    </>
   );
 }
 
@@ -114,6 +175,11 @@ export function Inspector() {
           <SliderField label="Group slices below" value={g.groupSmallSlicesBelowPct} min={0} max={15} step={0.5} format={(v) => (v === 0 ? "off" : `${v}%`)} onChange={(v) => set((d) => void (d.geometry.groupSmallSlicesBelowPct = v))} />
         )}
         <ToggleField label="Data labels" value={g.showDataLabels} onChange={(v) => set((d) => void (d.geometry.showDataLabels = v))} />
+      </Section>
+
+      <Section title="Motion">
+        <ToggleField label="Enable motion" value={doc.motion.enabled} onChange={(v) => set((d) => void (d.motion.enabled = v))} />
+        {doc.motion.enabled && <MotionControls />}
       </Section>
 
       {!isRadial && (

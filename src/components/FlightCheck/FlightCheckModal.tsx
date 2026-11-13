@@ -3,12 +3,12 @@ import { Download, X, Zap } from "lucide-react";
 import { useDocumentStore } from "../../store/documentStore";
 import { useUiStore } from "../../store/uiStore";
 import type { Backdrop } from "../../store/uiStore";
-import { renderStatic } from "../../export/pipeline";
-import type { ExportFormat } from "../../export/pipeline";
+import { isAnimated, renderAnimated, renderStatic } from "../../export/pipeline";
+import type { AnimatedFormat, ExportFormat } from "../../export/pipeline";
+import { BUDGET_BYTES, DEFAULT_FPS, FIT_LADDER, FPS_OPTIONS } from "../../export/animated/options";
 import { downloadBlob, fileNameFor } from "../../export/download";
 import { PLATFORMS, safeZone } from "./safeZones";
 
-const BUDGET_BYTES = 5 * 1024 * 1024;
 const FIT_SCALES = [2, 1.5, 1];
 const CHECKER = "conic-gradient(#cbd5e1 25%, #f1f5f9 0 50%, #cbd5e1 0 75%, #f1f5f9 0) 0 0 / 20px 20px";
 const BACKDROP_BG: Record<Backdrop, string> = { checker: CHECKER, dark: "#0F172A", white: "#FFFFFF" };
@@ -39,32 +39,69 @@ function Segmented<T extends string | number>({ label, value, options, onChange 
 
 export function FlightCheckModal() {
   const doc = useDocumentStore((s) => s.doc);
-  const { exportFormat: format, exportScale: scale, backdrop, safeZone: platform, setExport, setFlightCheckOpen } = useUiStore();
+  const { exportFormat: format, exportScale: scale, exportFps: fps, backdrop, safeZone: platform, setExport, setFlightCheckOpen } = useUiStore();
   const [preview, setPreview] = useState<{ blob: Blob; url: string } | null>(null);
   const [busy, setBusy] = useState(true);
+  const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fitNote, setFitNote] = useState<string | null>(null);
   const urlRef = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  /** A blob Fit-under-5-MB already encoded for exactly these settings, so the preview effect doesn't encode it twice. */
+  const readyRef = useRef<{ doc: typeof doc; key: string; blob: Blob } | null>(null);
   const { width, height } = doc.canvas;
+  const animated = isAnimated(format);
+  const motionOn = doc.motion.enabled;
 
-  // Preview = the exact export blob (same pipeline as Download), so size and pixels are real.
+  const showBlob = (blob: Blob) => {
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    urlRef.current = URL.createObjectURL(blob);
+    setPreview({ blob, url: urlRef.current });
+    setError(null);
+  };
+
+  // Preview = the exact export bytes (same pipeline as Download), so size, palette and motion are real.
   useEffect(() => {
-    let cancelled = false;
+    const ctl = new AbortController();
+    abortRef.current?.abort();
+    abortRef.current = ctl;
+    const key = `${format}|${scale}|${fps}`;
+    const ready = readyRef.current;
+    if (ready && ready.doc === doc && ready.key === key) {
+      readyRef.current = null;
+      showBlob(ready.blob);
+      setBusy(false);
+      return () => ctl.abort();
+    }
+    if (animated && !motionOn) {
+      setBusy(false);
+      setPreview(null);
+      return () => ctl.abort();
+    }
     setBusy(true);
-    renderStatic(doc, { format, scale })
-      .then((blob) => {
-        if (cancelled) return;
-        if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-        urlRef.current = URL.createObjectURL(blob);
-        setPreview({ blob, url: urlRef.current });
-        setError(null);
-      })
-      .catch((e: unknown) => !cancelled && setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => !cancelled && setBusy(false));
-    return () => {
-      cancelled = true;
+    setProgress(null);
+    const job = async () => {
+      if (isAnimated(format)) {
+        await new Promise((r) => setTimeout(r, 350)); // debounce slider drags before spinning up a worker
+        if (ctl.signal.aborted) return;
+        const res = await renderAnimated(doc, { format, fps, scale, signal: ctl.signal, onProgress: (d, t) => setProgress(d / t) });
+        if ("blob" in res) showBlob(res.blob);
+      } else {
+        showBlob(await renderStatic(doc, { format, scale }));
+      }
     };
-  }, [doc, format, scale]);
+    job()
+      .catch((e: unknown) => {
+        if (!ctl.signal.aborted) setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!ctl.signal.aborted) {
+          setBusy(false);
+          setProgress(null);
+        }
+      });
+    return () => ctl.abort();
+  }, [doc, format, scale, fps, animated, motionOn]);
 
   useEffect(
     () => () => {
@@ -79,12 +116,41 @@ export function FlightCheckModal() {
     return () => window.removeEventListener("keydown", onKey);
   }, [setFlightCheckOpen]);
 
+  const selectFormat = (v: ExportFormat) => {
+    const patch: { exportFormat: ExportFormat; exportFps?: number } = { exportFormat: v };
+    if (isAnimated(v) && !FPS_OPTIONS[v].includes(fps)) patch.exportFps = DEFAULT_FPS[v];
+    setFitNote(null);
+    setExport(patch);
+  };
+
   const fitUnderBudget = async () => {
+    abortRef.current?.abort();
+    const ctl = new AbortController();
+    abortRef.current = ctl;
     setBusy(true);
     setFitNote(null);
+    setError(null);
     try {
+      if (isAnimated(format)) {
+        const ladder = FIT_LADDER[format as AnimatedFormat];
+        for (const step of ladder) {
+          setFitNote(`Trying ${step.fps} fps at ${step.scale}×…`);
+          setProgress(0);
+          const res = await renderAnimated(doc, { format, ...step, maxBytes: BUDGET_BYTES, signal: ctl.signal, onProgress: (d, t) => setProgress(d / t) });
+          if ("blob" in res && res.blob.size <= BUDGET_BYTES) {
+            readyRef.current = { doc, key: `${format}|${step.scale}|${step.fps}`, blob: res.blob };
+            setExport({ exportScale: step.scale, exportFps: step.fps });
+            setFitNote(`Fits at ${step.fps} fps, ${step.scale}× (${formatBytes(res.blob.size)}).`);
+            return;
+          }
+        }
+        const last = ladder[ladder.length - 1]!;
+        setExport({ exportScale: last.scale, exportFps: last.fps });
+        setFitNote(`Still over 5 MB at ${last.fps} fps, ${last.scale}×. Try ${format === "gif" ? "Animated WebP" : "a shorter hold or fewer categories"}.`);
+        return;
+      }
       for (const s of FIT_SCALES) {
-        const blob = await renderStatic(doc, { format, scale: s });
+        const blob = await renderStatic(doc, { format: format as Exclude<ExportFormat, AnimatedFormat | "svg">, scale: s });
         if (blob.size <= BUDGET_BYTES) {
           setExport({ exportScale: s });
           setFitNote(`Fits at ${s}× (${formatBytes(blob.size)}).`);
@@ -93,8 +159,13 @@ export function FlightCheckModal() {
       }
       setFitNote("Still over 5 MB at 1×. Try WebP or JPG, or simplify the chart.");
       setExport({ exportScale: 1 });
+    } catch (e) {
+      if (!ctl.signal.aborted) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      if (!ctl.signal.aborted) {
+        setBusy(false);
+        setProgress(null);
+      }
     }
   };
 
@@ -118,7 +189,11 @@ export function FlightCheckModal() {
               )}
             </div>
           </div>
-          {busy && <div className="absolute left-4 top-4 rounded bg-white/90 px-2 py-1 text-xs text-slate-600 shadow">Rendering…</div>}
+          {busy && (
+            <div className="absolute left-4 top-4 rounded bg-white/90 px-2 py-1 text-xs text-slate-600 shadow">
+              {progress !== null ? `Encoding ${Math.round(progress * 100)}%` : "Rendering…"}
+            </div>
+          )}
         </div>
 
         <div className="flex w-[320px] shrink-0 flex-col gap-5 overflow-auto border-l border-slate-200 p-5">
@@ -129,18 +204,36 @@ export function FlightCheckModal() {
             </button>
           </div>
 
-          <Segmented<ExportFormat | "gif">
+          <Segmented<ExportFormat>
             label="Format"
             value={format}
-            onChange={(v) => v !== "gif" && setExport({ exportFormat: v })}
+            onChange={selectFormat}
             options={[
               { value: "svg", label: "SVG" },
               { value: "png", label: "PNG" },
               { value: "jpg", label: "JPG" },
               { value: "webp", label: "WebP" },
-              { value: "gif", label: "GIF", disabled: true, hint: "Animated export arrives in Milestone 2" },
+              { value: "gif", label: "GIF", disabled: !motionOn, hint: motionOn ? "Animated, 256 locked colors" : "Enable motion to export animation" },
+              { value: "awebp", label: "Animated WebP", disabled: !motionOn, hint: motionOn ? "Animated, full color" : "Enable motion to export animation" },
             ]}
           />
+          {animated && (
+            <Segmented<number>
+              label="Frame rate"
+              value={fps}
+              onChange={(v) => setExport({ exportFps: v })}
+              options={FPS_OPTIONS[format as AnimatedFormat].map((f) => ({ value: f, label: `${f} fps` }))}
+            />
+          )}
+          {format === "gif" && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              The preview is the real GIF: one locked 256-color palette sampled from the fully built chart, 50 fps max (GIF timing is 1/100 s).
+              <button className="mt-2 block rounded-md border border-amber-300 bg-white px-2.5 py-1 font-medium hover:bg-amber-100" onClick={() => selectFormat("awebp")}>
+                Switch to Animated WebP (full color)
+              </button>
+            </div>
+          )}
+          {animated && !motionOn && <p className="text-xs text-amber-700">Enable motion in the studio to export an animation.</p>}
           <Segmented<number>
             label="Scale"
             value={scale}
@@ -182,7 +275,7 @@ export function FlightCheckModal() {
               <div className={`h-full ${over ? "bg-rose-500" : "bg-emerald-500"}`} style={{ width: `${Math.min(100, (size / BUDGET_BYTES) * 100)}%` }} />
             </div>
             <div className="mt-1.5 text-xs text-slate-500">
-              Budget 5 MB · {isSvg ? `${width}×${height} vector` : `${Math.round(width * scale)}×${Math.round(height * scale)} px`}
+              Budget 5 MB · {animated ? `${Math.round(width * scale)}×${Math.round(height * scale)} px · ${fps} fps` : isSvg ? `${width}×${height} vector` : `${Math.round(width * scale)}×${Math.round(height * scale)} px`}
             </div>
             {!isSvg && (
               <button disabled={busy} onClick={fitUnderBudget} className="mt-2.5 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-50">
@@ -200,7 +293,7 @@ export function FlightCheckModal() {
             onClick={() => preview && downloadBlob(preview.blob, fileNameFor(doc.title, format, scale))}
             className="mt-auto inline-flex items-center justify-center gap-2 rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
           >
-            <Download size={16} /> Download {format.toUpperCase()}
+            <Download size={16} /> Download {format === "awebp" ? "ANIMATED WEBP" : format.toUpperCase()}
           </button>
         </div>
       </div>
