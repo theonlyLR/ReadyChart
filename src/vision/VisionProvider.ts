@@ -54,6 +54,8 @@ export interface ExtractedSeries {
   confidence: number;
   /** Optional per-value confidence (same length as labels); overrides `confidence` where present. */
   confidences?: (number | null)[];
+  /** Per value: true where the model estimated an unreadable mark (e.g. a 1% sliver) instead of reading it. */
+  estimated?: (boolean | null)[];
   colorHint?: string;
   /** y pixel of each bar top / point, in the coordinate frame of the image that was sent. Enables pixel math. */
   topsPx?: (number | null)[];
@@ -131,6 +133,7 @@ export function validateExtraction(raw: unknown): { chart: ExtractedChart | null
       valueSource: o.valueSource === "printed" ? "printed" : "estimated",
       confidence: Math.min(1, Math.max(0, num(o.confidence) ?? 0.5)),
       confidences: Array.isArray(o.confidences) ? fit(o.confidences, (x) => (num(x) === null ? null : Math.min(1, Math.max(0, num(x)!)))) : undefined,
+      estimated: Array.isArray(o.estimated) ? fit(o.estimated, (x) => (typeof x === "boolean" ? x : null)) : undefined,
       colorHint: hex(o.color),
       topsPx: Array.isArray(o.topsPx) ? fit(o.topsPx, num) : undefined,
     });
@@ -217,7 +220,8 @@ export function extractionToTable(chart: ExtractedChart, sampled: SampledColor[]
     const provenance = values.map((v, k): CellProvenance => {
       if (v === null) return "MISSING";
       const conf = s.confidences?.[k] ?? s.confidence;
-      return conf < CONFIDENCE_THRESHOLD || source === "guess" ? "LOW_CONFIDENCE" : goodTag;
+      // An estimated sliver is never "printed", even in a series whose other values were read exactly.
+      return conf < CONFIDENCE_THRESHOLD || source === "guess" || s.estimated?.[k] === true ? "LOW_CONFIDENCE" : goodTag;
     });
     const color = s.colorHint && palette.length ? nearestColor(s.colorHint, palette) : (s.colorHint ?? palette[i]);
     return { name: s.name, values, included: true, color, provenance };

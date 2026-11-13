@@ -7,6 +7,8 @@ import type { TextMeasurer } from "../textMeasure";
 import type { FrameState } from "../motion/frameState";
 import { FINAL_FRAME, itemAlpha, itemProgress, itemRoll, opacityProp, rollValue } from "../motion/frameState";
 import { formatPercent, formatValue } from "../format";
+import { luminance } from "../theme";
+import { planCallouts } from "./pieCallouts";
 
 export interface Slice {
   label: string;
@@ -43,12 +45,30 @@ export function pieNodes(doc: ChartDocument, plot: Rect, theme: Theme, measurer:
   if (total <= 0) return [];
   const cx = plot.x + plot.width / 2;
   const cy = plot.y + plot.height / 2;
-  const r = Math.max(10, Math.min(plot.width, plot.height) / 2 - 8 * u);
-  const inner = doc.geometry.type === "donut" ? r * doc.geometry.donutInnerRatio : 0;
-  const gen = arc<{ startAngle: number; endAngle: number }>().innerRadius(inner).outerRadius(r);
+  const r0 = Math.max(10, Math.min(plot.width, plot.height) / 2 - 8 * u);
+  const innerRatio = doc.geometry.type === "donut" ? doc.geometry.donutInnerRatio : 0;
   const angles = pie<Slice>().sort(null).value((d) => d.value)(slices);
   const nodes: SceneNode[] = [];
   const fontSize = 20 * u;
+
+  // Narrow slices get outside callouts; the radius is inset when they are active so labels never clip the plot box.
+  const showLabels = doc.geometry.showDataLabels;
+  const plan = showLabels
+    ? planCallouts({
+        geom: angles.map((a, i) => ({ start: a.startAngle, end: a.endAngle, frac: slices[i]!.value / total })),
+        cx,
+        cy,
+        r: r0,
+        innerRatio,
+        plot,
+        fontSize,
+        u,
+        textW: slices.map((sl) => measurer.width(formatPercent(sl.value / total), fontSize, 600)),
+      })
+    : { r: r0, callouts: [] };
+  const r = plan.r;
+  const inner = r * innerRatio;
+  const gen = arc<{ startAngle: number; endAngle: number }>().innerRadius(inner).outerRadius(r);
 
   angles.forEach((a, i) => {
     const slice = slices[i]!;
@@ -68,15 +88,27 @@ export function pieNodes(doc: ChartDocument, plot: Rect, theme: Theme, measurer:
     });
   });
 
-  if (doc.geometry.showDataLabels) {
+  if (showLabels) {
     const labelR = (inner + r) / 2;
+    const callouts = new Map(plan.callouts.map((c) => [c.index, c]));
     angles.forEach((a, i) => {
-      const sweep = a.endAngle - a.startAngle;
-      const text = formatPercent(slices[i]!.value / total);
-      const need = measurer.width(text, fontSize, 600) + 8 * u;
-      const shown = formatPercent(rollValue(slices[i]!.value, itemRoll(frame, i)) / total);
+      const slice = slices[i]!;
+      const shown = formatPercent(rollValue(slice.value, itemRoll(frame, i)) / total);
       const alpha = itemAlpha(frame, i);
-      if (sweep * labelR < need || (r - inner) < fontSize * 1.4) return;
+      const call = callouts.get(i);
+      if (call) {
+        // Leader: short radial tick + horizontal shelf, in the slice colour unless it would vanish on the page.
+        const hi = Math.max(luminance(slice.color), luminance(theme.surface));
+        const lo = Math.min(luminance(slice.color), luminance(theme.surface));
+        const stroke = (hi + 0.05) / (lo + 0.05) < 1.8 ? theme.muted : slice.color;
+        const w = Math.max(1, 1.5 * u);
+        nodes.push(
+          { kind: "line", x1: call.edge[0], y1: call.edge[1], x2: call.elbow[0], y2: call.elbow[1], stroke, strokeWidth: w, ...opacityProp(alpha) },
+          { kind: "line", x1: call.elbow[0], y1: call.elbow[1], x2: call.shelfEnd[0], y2: call.shelfEnd[1], stroke, strokeWidth: w, ...opacityProp(alpha) },
+          { kind: "text", x: call.textX, y: call.textY, text: shown, fontSize, fontWeight: 600, fill: theme.ink, anchor: call.anchor, ...opacityProp(alpha) },
+        );
+        return;
+      }
       const mid = (a.startAngle + a.endAngle) / 2;
       nodes.push({
         kind: "text",

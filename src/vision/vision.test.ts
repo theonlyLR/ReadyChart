@@ -115,3 +115,22 @@ describe("vision settings storage", () => {
     expect(loadVisionSettings(boom).apiKey).toBe("");
   });
 });
+
+describe("tiny sliver recovery", () => {
+  it("the prompt tells the model to estimate a visible unreadable sliver instead of leaving it null", async () => {
+    const { buildPrompt } = await import("./prompt");
+    const p = buildPrompt({ width: 10, height: 10, colors: [] });
+    expect(p).toMatch(/1% bar/);
+    expect(p).toMatch(/sum close to 100/);
+    expect(p).toMatch(/"estimated"/);
+  });
+  it("a value flagged estimated is LOW_CONFIDENCE even when the rest of the series was read exactly", () => {
+    const { chart } = validateExtraction({
+      labels: ["A", "B", "C"],
+      series: [{ name: "S", values: [60, 39, 1], valueSource: "printed", confidence: 0.95, estimated: [false, false, true] }],
+    });
+    const t = extractionToTable(chart!, []);
+    expect(t.series[0]!.values).toEqual([60, 39, 1]);
+    expect(t.series[0]!.provenance).toEqual(["OCR_EXACT", "OCR_EXACT", "LOW_CONFIDENCE"]);
+  });
+});
