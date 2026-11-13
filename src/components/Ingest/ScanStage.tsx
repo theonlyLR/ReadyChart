@@ -3,7 +3,6 @@ import { Loader2, X } from "lucide-react";
 import { useObjectUrl } from "../../hooks/useObjectUrl";
 import { DOCK_MS, cancelScan, retryScan } from "../../ingest/scanController";
 import { useUiStore } from "../../store/uiStore";
-import { KeyPrompt } from "./KeyPrompt";
 
 const STAGES = ["Detecting chart bounds & type...", "Sampling exact pixel palette...", "Reconstructing labels & data..."];
 /** The request is one long wait, so the pill moves from step 1 to 2 on a timer; step 3 only on the real response. */
@@ -89,16 +88,13 @@ export function ScanStage() {
       {failed ? (
         <div className="rc-rise flex w-full max-w-md flex-col gap-3 rounded-xl bg-white p-4 text-sm shadow-xl">
           <p className="text-slate-800">{scan.error}</p>
-          {scan.needsKey && <KeyPrompt />}
           <div className="flex justify-end gap-2">
             <button className="rounded-md px-3 py-1.5 text-slate-600 hover:bg-slate-100" onClick={cancelScan}>
               Close
             </button>
-            {!scan.needsKey && (
-              <button className="rounded-md bg-indigo-600 px-3 py-1.5 font-medium text-white hover:bg-indigo-700" onClick={retryScan}>
-                Try again
-              </button>
-            )}
+            <button className="rounded-md bg-indigo-600 px-3 py-1.5 font-medium text-white hover:bg-indigo-700" onClick={retryScan}>
+              Try again
+            </button>
           </div>
         </div>
       ) : (
@@ -121,6 +117,7 @@ export function ScanStage() {
           </button>
         </div>
       )}
+      {scan.local && !scan.demo && !failed && <p className="-mt-2 text-xs text-white/70">Reading this chart on your device.</p>}
       {scan.demo && !failed && <p className="-mt-2 text-xs text-white/70">Demo screenshot with a bundled extraction. No API key needed.</p>}
     </div>
   );

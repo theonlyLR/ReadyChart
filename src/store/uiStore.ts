@@ -13,8 +13,8 @@ export interface ScanUi {
   stage: 0 | 1 | 2;
   image: Blob | null;
   error: string | null;
-  /** Error was a missing API key: offer the inline key prompt. */
-  needsKey: boolean;
+  /** The on-device scan is doing the reading (no remote vision service available or it failed). Not an error. */
+  local: boolean;
   /** Bundled sample: canned extraction, no network. */
   demo: boolean;
 }
@@ -76,7 +76,7 @@ interface UiState {
   setExport: (patch: Partial<Pick<UiState, "exportFormat" | "exportScale" | "exportFps" | "backdrop" | "safeZone">>) => void;
 }
 
-export const IDLE_SCAN: ScanUi = { status: "idle", stage: 0, image: null, error: null, needsKey: false, demo: false };
+export const IDLE_SCAN: ScanUi = { status: "idle", stage: 0, image: null, error: null, local: false, demo: false };
 export const NO_COMPARE: CompareUi = { blob: null, collapsed: false, opacity: 45 };
 
 let toastId = 0;

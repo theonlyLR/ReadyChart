@@ -27,3 +27,4 @@ dist-ssr
 *.webp
 !public/**/*.webp
 !src/**/*.webp
+.env.local

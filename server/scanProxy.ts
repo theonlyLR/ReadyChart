@@ -12,7 +12,7 @@ export type ProviderId = "gemini" | "anthropic" | "openai";
 export const PROVIDERS: readonly ProviderId[] = ["gemini", "anthropic", "openai"];
 
 const ENV_KEYS: Record<ProviderId, string> = { gemini: "GEMINI_API_KEY", anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY" };
-const DEFAULT_MODELS: Record<ProviderId, string> = { gemini: "gemini-2.5-flash", anthropic: "claude-sonnet-5-5", openai: "gpt-4o" };
+const DEFAULT_MODELS: Record<ProviderId, string> = { gemini: "gemini-flash-latest", anthropic: "claude-sonnet-5-5", openai: "gpt-4o" };
 const MODEL_ENV: Record<ProviderId, string> = { gemini: "GEMINI_MODEL", anthropic: "ANTHROPIC_MODEL", openai: "OPENAI_MODEL" };
 
 export const MAX_BODY_BYTES = 15 * 1024 * 1024;
@@ -45,19 +45,100 @@ export function configuredProvider(env: Env): ProviderId | null {
   return PROVIDERS.find((p) => env[ENV_KEYS[p]]?.trim()) ?? null;
 }
 
-type Call = { image: string; mime: string; prompt: string; model: string; key: string; fetchImpl: typeof fetch; signal?: AbortSignal };
+type Call = { image: string; mime: string; prompt: string; model: string; /** Gemini only: models to try in priority order. */ models: string[]; key: string; fetchImpl: typeof fetch; signal?: AbortSignal };
+
+/**
+ * Evergreen Gemini model list, tried in order. "-latest" aliases track Google's current model so a deprecation doesn't
+ * break scans; the pinned names are fallbacks. GEMINI_MODEL in .env.local replaces the whole list.
+ */
+export const GEMINI_MODELS: readonly string[] = ["gemini-flash-latest", "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-flash-lite-latest"];
+
+type Endpoint = "studio" | "vertex";
+export interface GeminiRoute {
+  endpoint: Endpoint;
+  model: string;
+}
+const ENDPOINT_URL: Record<Endpoint, (model: string) => string> = {
+  studio: (m) => `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`,
+  vertex: (m) => `https://aiplatform.googleapis.com/v1/publishers/google/models/${encodeURIComponent(m)}:generateContent`,
+};
+const ENDPOINT_LABEL: Record<Endpoint, string> = { studio: "AI Studio", vertex: "Vertex AI Express" };
+
+/** First (endpoint, model) that returned 200 for a key, so later scans succeed on the first try. In memory only. */
+const geminiRoutes = new Map<string, GeminiRoute>();
+export const cachedGeminiRoute = (key: string): GeminiRoute | undefined => geminiRoutes.get(key);
+export const resetGeminiRoutes = (): void => geminiRoutes.clear();
+
+/** Pull Google's `error.message` out of an error body (falls back to a short raw snippet). Never contains the key. */
+export function upstreamMessage(text: string): string {
+  try {
+    const m = (JSON.parse(text) as { error?: { message?: unknown } }).error?.message;
+    if (typeof m === "string" && m) return m.slice(0, 500);
+  } catch {
+    // not JSON
+  }
+  return text.trim().slice(0, 200) || "(empty response)";
+}
+
+/** Log a failed upstream call to stderr: provider label, HTTP status and the provider's own message. */
+async function logFailure(label: string, res: Response): Promise<string> {
+  const text = await res.clone().text().catch(() => "");
+  console.error(`[scan-chart] ${label} -> HTTP ${res.status}: ${upstreamMessage(text)}`);
+  return text;
+}
+
+/** Gemini 3.x config: JSON out, low thinking. No legacy temperature / thinkingBudget. */
+const geminiBody = (c: Call) =>
+  JSON.stringify({
+    contents: [{ role: "user", parts: [{ inline_data: { mime_type: c.mime, data: c.image } }, { text: c.prompt }] }],
+    generationConfig: { responseMimeType: "application/json", thinkingConfig: { thinkingLevel: "low" } },
+  });
+
+/**
+ * Self-healing Gemini call. Tries the cached route first, then every (model, endpoint) pair: AI Studio then Vertex AI
+ * Express (both with the x-goog-api-key header) for each model in priority order. The first 200 is cached. A stale
+ * cached route is dropped and the cascade continues, so deprecated models, endpoint mismatches ("AQ." keys on the wrong
+ * host) and transient 429/5xx/network errors all heal without user action. It stops early only when the key itself is
+ * invalid (an API_KEY_INVALID 400, or a 401 from both endpoints), because no other route can fix that.
+ */
+async function callGemini(c: Call): Promise<Response> {
+  const cached = geminiRoutes.get(c.key);
+  const order: GeminiRoute[] = cached ? [cached] : [];
+  for (const model of c.models) for (const endpoint of ["studio", "vertex"] as const) if (!(cached && cached.model === model && cached.endpoint === endpoint)) order.push({ endpoint, model });
+
+  let last: Response | null = null;
+  const unauthorized = new Map<string, number>();
+  for (const route of order) {
+    const label = `gemini (${ENDPOINT_LABEL[route.endpoint]}, ${route.model})`;
+    let res: Response;
+    try {
+      res = await c.fetchImpl(ENDPOINT_URL[route.endpoint](route.model), { method: "POST", signal: c.signal, headers: { "content-type": "application/json", "x-goog-api-key": c.key }, body: geminiBody(c) });
+    } catch (e) {
+      if (c.signal?.aborted) throw e;
+      console.error(`[scan-chart] ${label} -> network error: ${e instanceof Error ? e.message : "request failed"}`);
+      continue;
+    }
+    if (res.ok) {
+      if (cached?.endpoint !== route.endpoint || cached.model !== route.model) console.error(`[scan-chart] gemini route cached: ${ENDPOINT_LABEL[route.endpoint]}, ${route.model}`);
+      geminiRoutes.set(c.key, route);
+      return res;
+    }
+    const text = await logFailure(label, res);
+    last = res;
+    if (route === cached) geminiRoutes.delete(c.key);
+    if (res.status === 400 && /API_KEY_INVALID|API key not valid/i.test(text)) return res;
+    if (res.status === 401) {
+      const n = (unauthorized.get(route.model) ?? 0) + 1;
+      unauthorized.set(route.model, n);
+      if (n >= 2) return res;
+    }
+  }
+  if (last) return last;
+  throw new Error("Couldn't reach Gemini.");
+}
 
 const adapters: Record<ProviderId, (c: Call) => Promise<Response>> = {
-  gemini: (c) =>
-    c.fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(c.model)}:generateContent`, {
-      method: "POST",
-      signal: c.signal,
-      headers: { "content-type": "application/json", "x-goog-api-key": c.key },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ inline_data: { mime_type: c.mime, data: c.image } }, { text: c.prompt }] }],
-        generationConfig: { responseMimeType: "application/json", temperature: 0 },
-      }),
-    }),
+  gemini: callGemini,
   anthropic: (c) =>
     c.fetchImpl("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -118,12 +199,14 @@ export async function handleScan(req: ScanRequest, env: Env, fetchImpl: typeof f
     colors: Array.isArray(h.colors) ? h.colors.filter((c): c is string => typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c)).slice(0, 8) : [],
   });
 
+  const pinned = env[MODEL_ENV[creds.provider]]?.trim();
   let res: Response;
   try {
-    res = await adapters[creds.provider]({ image: parsed.image, mime, prompt, model: env[MODEL_ENV[creds.provider]]?.trim() || DEFAULT_MODELS[creds.provider], key: creds.key, fetchImpl, signal });
+    res = await adapters[creds.provider]({ image: parsed.image, mime, prompt, model: pinned || DEFAULT_MODELS[creds.provider], models: pinned ? [pinned] : [...GEMINI_MODELS], key: creds.key, fetchImpl, signal });
   } catch {
     return fail(502, "upstream", "Couldn't reach the vision provider.");
   }
+  if (!res.ok && creds.provider !== "gemini") await logFailure(creds.provider, res); // Gemini attempts are logged in callGemini
   if (res.status === 400 && creds.provider === "gemini") {
     // Gemini reports an invalid key as 400 INVALID_ARGUMENT with an API_KEY_INVALID reason.
     const t = await res.text().catch(() => "");

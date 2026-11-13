@@ -1,4 +1,5 @@
 import { createAnthropicProvider } from "../vision/anthropicProvider";
+import { withFallback } from "../vision/fallbackProvider";
 import { VisionError } from "../vision/prompt";
 import { createProxyProvider, probeProxy } from "../vision/proxyProvider";
 import type { VisionProvider } from "../vision/VisionProvider";
@@ -7,7 +8,8 @@ import { playReveal } from "../hooks/usePlayback";
 import { useDocumentStore } from "../store/documentStore";
 import { IDLE_SCAN, NO_COMPARE, useUiStore } from "../store/uiStore";
 import { loadScreenshot } from "./image/loadImage";
-import { scanChart } from "./image/scanChart";
+import { createLocalProvider } from "./image/localScan";
+import { ScanError, scanChart } from "./image/scanChart";
 import type { ScanResult } from "./image/scanTypes";
 import { loadSampleExtraction } from "./sample";
 import { applyScanResult } from "./toDocument";
@@ -47,16 +49,29 @@ export function cancelScan(): void {
   useUiStore.getState().setScan(IDLE_SCAN);
 }
 
-async function pickProvider(): Promise<VisionProvider> {
+/** A configured remote provider, or null when there is none (the on-device scan then runs directly). */
+async function pickRemote(): Promise<VisionProvider | null> {
   const { apiKey, provider, model } = useVisionStore.getState();
   const proxy = await probeProxy();
   if (proxy.available) {
-    if (!proxy.configured && !apiKey) throw new VisionError("Add an API key to scan screenshots, or put one in .env.local.", "no_key");
+    if (!proxy.configured && !apiKey) return null;
     return createProxyProvider(() => ({ apiKey: useVisionStore.getState().apiKey, provider: useVisionStore.getState().provider }));
   }
-  // Static build: no server, so the browser calls Anthropic itself with the user's own key.
-  if (apiKey && provider === "anthropic") return createAnthropicProvider(apiKey, model);
-  throw new VisionError(apiKey ? "This build can only call Anthropic directly. Switch your key's provider to Anthropic." : "Add an Anthropic API key to scan screenshots.", "no_key");
+  // Static build: no server, so the browser calls Anthropic itself, but only if the user already saved a key.
+  return apiKey && provider === "anthropic" ? createAnthropicProvider(apiKey, model) : null;
+}
+
+/** Remote vision when available; any failure (or no remote at all) falls through to the on-device scan. Never a dead end. */
+async function pickProvider(signal: AbortSignal): Promise<VisionProvider> {
+  const local = createLocalProvider();
+  const markLocal = () => useUiStore.getState().setScan({ local: true });
+  const remote = await pickRemote();
+  signal.throwIfAborted();
+  if (!remote) {
+    markLocal();
+    return local;
+  }
+  return withFallback(remote, local, markLocal);
 }
 
 function demoProvider(signal: AbortSignal): VisionProvider {
@@ -83,7 +98,7 @@ export async function startScan(image: Blob, opts: { demo?: boolean } = {}): Pro
 
   try {
     const loaded = await loadScreenshot(image);
-    const provider = opts.demo ? demoProvider(ac.signal) : await pickProvider();
+    const provider = opts.demo ? demoProvider(ac.signal) : await pickProvider(ac.signal);
     const result = await scanChart(loaded, {
       provider,
       signal: ac.signal,
@@ -93,12 +108,8 @@ export async function startScan(image: Blob, opts: { demo?: boolean } = {}): Pro
     if (live()) commit(result);
   } catch (e) {
     if (!live() || isAbort(e)) return;
-    const code = e instanceof VisionError ? e.code : "error";
-    useUiStore.getState().setScan({
-      status: "error",
-      error: e instanceof Error && e.message ? e.message : "Couldn't read that screenshot.",
-      needsKey: code === "no_key" || code === "bad_key",
-    });
+    // Only reachable when the on-device scan found nothing either. Its message is written for end users.
+    useUiStore.getState().setScan({ status: "error", error: e instanceof VisionError || e instanceof ScanError ? e.message : "We couldn't read that screenshot. Try a clearer crop, or paste the numbers with ⌘V." });
   }
 }
 
