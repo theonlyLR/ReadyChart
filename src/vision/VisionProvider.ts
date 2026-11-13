@@ -35,6 +35,16 @@ export interface SamplePoints {
   bars: NormPoint[];
 }
 
+/**
+ * Value axis anchors, as coordinates along the value axis (y for vertical bars, x for horizontal), 0..1000 of the FULL
+ * image. Lets the app turn bar sizes into numbers when the chart has no printed labels.
+ */
+export interface AxisScale {
+  zeroBaselineCoord: number | null;
+  topTickCoord: number | null;
+  topTickValue: number | null;
+}
+
 export interface ExtractedStyle {
   showXAxis?: boolean;
   showYAxis?: boolean;
@@ -73,6 +83,9 @@ export interface ExtractedChart {
   axis?: AxisCalibration;
   /** Chart area alone, without browser tabs, toolbars or page chrome. */
   chartBounds?: NormBounds;
+  /** One box per mark (bar / column / slice), in order, same length as labels. null = the model gave an unusable box. */
+  elementBounds?: (NormBounds | null)[];
+  axisScale?: AxisScale;
   samplePoints?: SamplePoints;
   style: ExtractedStyle;
 }
@@ -93,6 +106,15 @@ function point(v: unknown): NormPoint | null {
   const x = num(v[0]);
   const y = num(v[1]);
   return x === null || y === null ? null : [norm(x), norm(y)];
+}
+
+/** A mark's box: like parseBounds but with no minimum size, because 1-2 px slivers are exactly what this is for. */
+export function parseElementBox(v: unknown): NormBounds | null {
+  if (!Array.isArray(v) || v.length < 4) return null;
+  const n = v.slice(0, 4).map(num);
+  if (n.some((x) => x === null)) return null;
+  const [a, b, c, d] = n.map((x) => norm(x!)) as [number, number, number, number];
+  return [Math.min(a, c), Math.min(b, d), Math.max(a, c), Math.max(b, d)];
 }
 
 /** [ymin,xmin,ymax,xmax] -> clamped, ordered box; null when missing, malformed or implausibly small. */
@@ -150,6 +172,18 @@ export function validateExtraction(raw: unknown): { chart: ExtractedChart | null
   if (r.chartBounds !== undefined && !chartBounds) warnings.push("The chart's crop box looked wrong, so the whole image was used.");
 
   const sp = r.samplePoints && typeof r.samplePoints === "object" ? (r.samplePoints as Record<string, unknown>) : null;
+  let elementBounds: (NormBounds | null)[] | undefined;
+  if (Array.isArray(r.elementBounds)) {
+    elementBounds = r.elementBounds.map(parseElementBox);
+    if (elementBounds.length !== labels.length) {
+      warnings.push(`The model gave ${elementBounds.length} element boxes for ${labels.length} labels, so bar sizes weren't used.`);
+      elementBounds = undefined;
+    }
+  }
+  const ax = r.axisScale && typeof r.axisScale === "object" ? (r.axisScale as Record<string, unknown>) : null;
+  const coord = (v: unknown): number | null => (num(v) === null ? null : norm(num(v)!));
+  const axisScale: AxisScale | undefined = ax ? { zeroBaselineCoord: coord(ax.zeroBaselineCoord), topTickCoord: coord(ax.topTickCoord), topTickValue: num(ax.topTickValue) } : undefined;
+
   // Unusable entries become NO_POINT so the rest keep their series / bar index.
   const list = (v: unknown): NormPoint[] => (Array.isArray(v) ? v.map((p) => point(p) ?? NO_POINT) : []);
   const samplePoints: SamplePoints | undefined = sp ? { background: point(sp.background) ?? undefined, series: list(sp.series), bars: list(sp.bars) } : undefined;
@@ -176,6 +210,8 @@ export function validateExtraction(raw: unknown): { chart: ExtractedChart | null
       units: { prefix: str(u.prefix, 3), suffix: str(u.suffix, 3) },
       axis,
       chartBounds,
+      elementBounds,
+      axisScale,
       samplePoints,
       style,
     },
@@ -220,8 +256,9 @@ export function extractionToTable(chart: ExtractedChart, sampled: SampledColor[]
     const provenance = values.map((v, k): CellProvenance => {
       if (v === null) return "MISSING";
       const conf = s.confidences?.[k] ?? s.confidence;
-      // An estimated sliver is never "printed", even in a series whose other values were read exactly.
-      return conf < CONFIDENCE_THRESHOLD || source === "guess" || s.estimated?.[k] === true ? "LOW_CONFIDENCE" : goodTag;
+      // An estimated sliver or a bar-size measurement is never "printed", even when the other values were read exactly.
+      if (s.estimated?.[k] === true) return "ESTIMATED";
+      return conf < CONFIDENCE_THRESHOLD || source === "guess" ? "LOW_CONFIDENCE" : goodTag;
     });
     const color = s.colorHint && palette.length ? nearestColor(s.colorHint, palette) : (s.colorHint ?? palette[i]);
     return { name: s.name, values, included: true, color, provenance };

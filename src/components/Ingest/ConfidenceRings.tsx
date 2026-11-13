@@ -4,9 +4,10 @@ import { computeHandles } from "../../engine/sculpt";
 import { useUiStore } from "../../store/uiStore";
 
 const RING_PX = 40;
+const isFlagged = (p: string | undefined): boolean => p === "LOW_CONFIDENCE" || p === "ESTIMATED";
 
 /**
- * Pulsing amber rings on bars / points whose extracted value is LOW_CONFIDENCE (< 0.85). Editor-only: it is a DOM
+ * Pulsing amber rings on bars / points whose extracted value is LOW_CONFIDENCE (< 0.85) or ESTIMATED (measured from bar size). Editor-only: it is a DOM
  * overlay, never part of the scene, so no export ever contains it. Cleared by editing, dragging or clicking the
  * point (SculptOverlay confirms the cell) because confirming flips its provenance away from LOW_CONFIDENCE.
  */
@@ -15,7 +16,7 @@ export function ConfidenceRings({ doc, layout }: { doc: ChartDocument; layout: L
   const playheadMs = useUiStore((s) => s.playheadMs);
   const editing = useUiStore((s) => s.editingField);
   if (playing || playheadMs !== null || editing !== null) return null;
-  const flagged = computeHandles(doc, layout).filter((h) => doc.data.series[h.seriesIndex]?.provenance[h.index] === "LOW_CONFIDENCE");
+  const flagged = computeHandles(doc, layout).filter((h) => isFlagged(doc.data.series[h.seriesIndex]?.provenance[h.index]));
   if (flagged.length === 0) return null;
   const { width: W, height: H } = doc.canvas;
   return (

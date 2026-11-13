@@ -90,11 +90,11 @@ async function logFailure(label: string, res: Response): Promise<string> {
   return text;
 }
 
-/** Gemini 3.x config: JSON out, low thinking. No legacy temperature / thinkingBudget. */
+/** Gemini 3.x config: JSON out, medium thinking so it counts every mark and aligns labels. No legacy temperature / thinkingBudget. */
 const geminiBody = (c: Call) =>
   JSON.stringify({
     contents: [{ role: "user", parts: [{ inline_data: { mime_type: c.mime, data: c.image } }, { text: c.prompt }] }],
-    generationConfig: { responseMimeType: "application/json", thinkingConfig: { thinkingLevel: "low" } },
+    generationConfig: { responseMimeType: "application/json", thinkingConfig: { thinkingLevel: "medium" } },
   });
 
 /**

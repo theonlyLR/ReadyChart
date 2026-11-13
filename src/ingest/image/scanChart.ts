@@ -1,7 +1,9 @@
+import { luminance } from "../../engine/theme";
 import { extractionToTable, validateExtraction } from "../../vision/VisionProvider";
 import type { VisionProvider } from "../../vision/VisionProvider";
 import { boundsToRect, cropScreenshot } from "./crop";
-import { deriveDesign } from "./design";
+import { applyMeasuredColors, deriveDesign } from "./design";
+import { verifyGeometry } from "./geometry";
 import { loadScreenshot } from "./loadImage";
 import type { LoadedScreenshot } from "./loadImage";
 import { sampleDominantColors } from "./sampleColors";
@@ -11,6 +13,9 @@ import type { ScanResult } from "./scanTypes";
 export type ScanStage = 0 | 1 | 2;
 
 export class ScanError extends Error {}
+
+/** The text colour the theme would pick on this background (so inside-bar labels can be told apart from fill). */
+const autoInk = (background: string): string => (luminance(background) < 0.25 ? "#F8FAFC" : "#0F172A");
 
 export interface ScanOptions {
   provider: VisionProvider;
@@ -37,13 +42,19 @@ export async function scanChart(image: Blob | LoadedScreenshot, opts: ScanOption
   onStage?.(1);
   const rect = boundsToRect(chart.chartBounds, loaded.width, loaded.height);
   const cropped = await cropScreenshot(loaded, rect);
-  const { design, seriesColors } = deriveDesign(chart, cropped.pixels, rect, loaded);
+  const sampled = deriveDesign(chart, cropped.pixels, rect, loaded);
+
+  // Measure the real pixels in every element box: recover unreadable values from bar sizes, double-check OCR'd numbers
+  // against them, and take text-safe median fill colours instead of a single sample point.
+  const ink = sampled.design.textColor ?? (sampled.design.background ? autoInk(sampled.design.background) : null);
+  const geo = verifyGeometry({ chart, crop: cropped.pixels, rect, full: loaded, background: sampled.design.background, ink });
+  const { design, seriesColors } = applyMeasuredColors(sampled, geo.chart, geo.colors);
 
   onStage?.(2);
-  const table = extractionToTable(chart, colors);
+  const table = extractionToTable(geo.chart, colors);
   table.series.forEach((s, i) => {
     s.color = seriesColors[i] ?? s.color;
   });
   table.warnings.push(...warnings);
-  return { chart, table, design, croppedBlob: cropped.blob, warnings: table.warnings };
+  return { chart: geo.chart, table, design, croppedBlob: cropped.blob, warnings: table.warnings };
 }

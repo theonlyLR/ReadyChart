@@ -12,6 +12,7 @@ const TINT: Record<CellProvenance, string> = {
   OCR_EXACT: "bg-emerald-50",
   AXIS_MEASURED: "bg-violet-100",
   LOW_CONFIDENCE: "bg-amber-100",
+  ESTIMATED: "bg-amber-100",
   MISSING: "bg-rose-50",
 };
 
@@ -21,6 +22,7 @@ const HINT: Record<CellProvenance, string> = {
   OCR_EXACT: "Read from a printed label in the screenshot. Check it",
   AXIS_MEASURED: "Estimated from pixel positions. Check it",
   LOW_CONFIDENCE: "Low-confidence extraction. Check it",
+  ESTIMATED: "Estimated from the bar's measured size. Check it",
   MISSING: "Missing",
 };
 

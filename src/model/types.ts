@@ -1,5 +1,5 @@
 export type ChartType = "bar" | "horizontal-bar" | "stacked-bar" | "line" | "area" | "pie" | "donut";
-export type CellProvenance = "USER_INPUT" | "PARSED" | "OCR_EXACT" | "AXIS_MEASURED" | "LOW_CONFIDENCE" | "MISSING";
+export type CellProvenance = "USER_INPUT" | "PARSED" | "OCR_EXACT" | "AXIS_MEASURED" | "LOW_CONFIDENCE" | "ESTIMATED" | "MISSING";
 export type AspectPreset = "16:9" | "4:5" | "9:16" | "1:1" | "custom";
 export type DataLabelPosition = "outside-top" | "inside-top" | "inside-bottom";
 export type ContrastBackdrop = "none" | "frosted-pill" | "auto-invert";

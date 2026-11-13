@@ -74,7 +74,7 @@ describe("handleScan", () => {
       const e = quiet();
       const f = vi.fn().mockResolvedValue(ok());
       await run(f);
-      expect(JSON.parse(String(init(f, 0).body)).generationConfig).toEqual({ responseMimeType: "application/json", thinkingConfig: { thinkingLevel: "low" } });
+      expect(JSON.parse(String(init(f, 0).body)).generationConfig).toEqual({ responseMimeType: "application/json", thinkingConfig: { thinkingLevel: "medium" } });
       e.mockRestore();
     });
     it("attaches an 8 s deadline signal to every attempt", async () => {

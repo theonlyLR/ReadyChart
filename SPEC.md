@@ -2,7 +2,7 @@
 
 ## 1. Core Scene Graph (ChartDocument)
 export type ChartType = "bar" | "horizontal-bar" | "stacked-bar" | "line" | "area" | "pie" | "donut";
-export type CellProvenance = "USER_INPUT" | "PARSED" | "OCR_EXACT" | "AXIS_MEASURED" | "LOW_CONFIDENCE" | "MISSING";
+export type CellProvenance = "USER_INPUT" | "PARSED" | "OCR_EXACT" | "AXIS_MEASURED" | "LOW_CONFIDENCE" | "ESTIMATED" | "MISSING";
 
 export interface DataSeries {
   id: string;

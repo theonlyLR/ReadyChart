@@ -214,6 +214,7 @@ export function buildLocalExtraction(img: PixelBuffer, lines: OcrLine[]): Record
     units: { prefix, suffix },
     series: [series],
     axis,
+    elementBounds: bars.map((b) => [norm(b.top, H), norm(b.left, W), norm(b.bottom, H), norm(b.right, W)]),
     chartBounds: [norm(region.top, H), norm(region.left, W), norm(region.bottom, H), norm(region.right, W)],
     samplePoints: { background: [norm(region.left + 6, W), norm(region.top + 6, H)], series: [spot(bars[0]!)], bars: bars.map(spot) },
     style: {

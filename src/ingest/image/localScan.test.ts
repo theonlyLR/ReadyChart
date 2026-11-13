@@ -79,6 +79,7 @@ describe("buildLocalExtraction", () => {
     expect((raw.style as Record<string, unknown>).showDataLabels).toBe(true);
     expect((raw.style as Record<string, unknown>).dataLabelPosition).toBe("outside-top");
     expect((raw.samplePoints as { bars: unknown[] }).bars).toHaveLength(4);
+    expect(raw.elementBounds).toHaveLength(4); // one box per bar, so geometry verification also checks OCR digits
   });
   it("produces JSON the shared pipeline accepts, and sampling recovers exact colours", () => {
     const img = vertical();

@@ -104,3 +104,20 @@ export function mostCommon(colors: string[]): string | null {
   }
   return best;
 }
+
+/**
+ * Swap in the text-safe median fill colours measured from elementBounds (single-series bar charts): the most common
+ * colour becomes the series colour, and bars that differ from it become per-bar overrides.
+ */
+export function applyMeasuredColors(derived: DerivedDesign, chart: ExtractedChart, colors: (string | null)[]): DerivedDesign {
+  const valid = colors.filter((c): c is string => c !== null);
+  const single = chart.series.length === 1 && (chart.chartType === "bar" || chart.chartType === "horizontal-bar");
+  if (!single || valid.length < Math.ceil(colors.length / 2)) return derived;
+  const base = mostCommon(valid);
+  if (!base) return derived;
+  const barColors: Record<number, string> = {};
+  colors.forEach((c, i) => {
+    if (c && colorDistance(c, base) > SAME_COLOR) barColors[i] = c;
+  });
+  return { design: { ...derived.design, barColors }, seriesColors: [base] };
+}

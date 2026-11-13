@@ -135,7 +135,7 @@ function commit(result: ScanResult): void {
     if (useUiStore.getState().scan.status === "docking") useUiStore.getState().setScan(IDLE_SCAN);
   }, DOCK_MS);
 
-  const low = useDocumentStore.getState().doc.data.series.reduce((n, s) => n + s.provenance.filter((p) => p === "LOW_CONFIDENCE").length, 0);
+  const low = useDocumentStore.getState().doc.data.series.reduce((n, s) => n + s.provenance.filter((p) => p === "LOW_CONFIDENCE" || p === "ESTIMATED").length, 0);
   ui.showToast({
     message: low > 0 ? `Chart rebuilt. ${low} value${low === 1 ? "" : "s"} marked for a second look.` : "Chart rebuilt from your screenshot.",
     actionLabel: "Undo",

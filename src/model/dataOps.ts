@@ -45,7 +45,7 @@ export function setCell(data: Data, seriesIndex: number, i: number, value: numbe
 }
 
 /** Provenance values that still need a human look. USER_INPUT (typed or confirmed) is verified; MISSING is just empty. */
-const UNVERIFIED: ReadonlySet<string> = new Set(["PARSED", "OCR_EXACT", "AXIS_MEASURED", "LOW_CONFIDENCE"]);
+const UNVERIFIED: ReadonlySet<string> = new Set(["PARSED", "OCR_EXACT", "AXIS_MEASURED", "LOW_CONFIDENCE", "ESTIMATED"]);
 
 export function isUnverified(p: string | undefined): boolean {
   return p !== undefined && UNVERIFIED.has(p);
