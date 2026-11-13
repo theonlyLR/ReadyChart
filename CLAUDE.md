@@ -1,7 +1,7 @@
 # Project Rules & Architectural Invariants
 
 ## Stack & Commands
-- Stack: Vite, React 18, TypeScript (strict), Tailwind CSS, Zustand + Immer (undo/redo), d3-scale & d3-shape (math/path generation only).
+- Stack: Vite, React 19, TypeScript (strict), Tailwind CSS, Zustand + Immer (undo/redo), d3-scale & d3-shape (math/path generation only).
 - Typecheck: npm run typecheck
 - Tests: npm test
 - Dev Server: npm run dev

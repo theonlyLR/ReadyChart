@@ -1,0 +1,130 @@
+import { ASPECT_PRESETS } from "../../model/defaults";
+import type { AspectPreset, ChartDocument } from "../../model/types";
+import { parseCellNumber } from "../../model/dataOps";
+import { useDocumentStore } from "../../store/documentStore";
+import { CommitInput } from "../CommitInput";
+import { ColorField, Section, SelectField, SliderField, TextField, ToggleField } from "./fields";
+
+const ASPECTS: { value: AspectPreset; label: string }[] = [
+  { value: "16:9", label: "16:9 Landscape" },
+  { value: "4:5", label: "4:5 Portrait" },
+  { value: "9:16", label: "9:16 Story" },
+  { value: "1:1", label: "1:1 Square" },
+  { value: "custom", label: "Custom" },
+];
+
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+const px = (v: number) => `${v}px`;
+
+/** Numeric axis bound: "auto" toggle plus a committed number field. */
+function AxisBound({ label, value, onChange }: { label: string; value: number | "auto"; onChange: (v: number | "auto") => void }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-xs font-medium text-slate-600">{label}</span>
+      <div className="flex items-center gap-2">
+        <CommitInput
+          ariaLabel={label}
+          inputMode="decimal"
+          className="w-20 rounded-md border border-slate-200 px-2 py-1 text-right text-sm tabular-nums focus:border-indigo-400 focus:outline-none"
+          value={value === "auto" ? "" : String(value)}
+          placeholder="auto"
+          onCommit={(t) => {
+            const n = parseCellNumber(t);
+            if (n === null) onChange("auto");
+            else if (n !== undefined) onChange(n);
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export function Inspector() {
+  const doc = useDocumentStore((s) => s.doc);
+  const update = useDocumentStore((s) => s.update);
+  const set = (recipe: (d: ChartDocument) => void) => update(recipe);
+  const { canvas, geometry: g, data } = doc;
+  const type = g.type;
+  const isBar = type === "bar" || type === "horizontal-bar" || type === "stacked-bar";
+  const isLine = type === "line" || type === "area";
+  const isRadial = type === "pie" || type === "donut";
+
+  return (
+    <div className="pb-8">
+      <h2 className="border-b border-slate-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Inspector</h2>
+
+      <Section title="Text">
+        <TextField label="Title" value={doc.title} onCommit={(v) => set((d) => void (d.title = v))} />
+        <TextField label="Subtitle" value={doc.subtitle} onCommit={(v) => set((d) => void (d.subtitle = v))} />
+        <TextField label="Source footer" value={doc.sourceFooter} onCommit={(v) => set((d) => void (d.sourceFooter = v))} />
+      </Section>
+
+      <Section title="Canvas">
+        <SelectField
+          label="Aspect"
+          value={canvas.aspectPreset}
+          options={ASPECTS}
+          onChange={(v) =>
+            set((d) => {
+              d.canvas.aspectPreset = v;
+              if (v !== "custom") Object.assign(d.canvas, ASPECT_PRESETS[v]);
+            })
+          }
+        />
+        {canvas.aspectPreset === "custom" && (
+          <>
+            <SliderField label="Width" value={canvas.width} min={320} max={3840} step={10} format={px} onChange={(v) => set((d) => void (d.canvas.width = v))} />
+            <SliderField label="Height" value={canvas.height} min={320} max={3840} step={10} format={px} onChange={(v) => set((d) => void (d.canvas.height = v))} />
+          </>
+        )}
+        <ColorField label="Background" value={canvas.background} onChange={(v) => set((d) => void (d.canvas.background = v))} />
+        <ToggleField label="Transparent background" value={canvas.transparent} onChange={(v) => set((d) => void (d.canvas.transparent = v))} />
+        {(["Top", "Right", "Bottom", "Left"] as const).map((side, i) => (
+          <SliderField key={side} label={`Padding ${side.toLowerCase()}`} value={canvas.padding[i]!} min={0} max={240} format={px} onChange={(v) => set((d) => void (d.canvas.padding[i] = v))} />
+        ))}
+      </Section>
+
+      <Section title="Number format">
+        <TextField label="Locale" value={data.locale} onCommit={(v) => set((d) => void (d.data.locale = v.trim() || "en-US"))} />
+        <div className="grid grid-cols-2 gap-3">
+          <TextField label="Prefix" value={data.unitPrefix} onCommit={(v) => set((d) => void (d.data.unitPrefix = v))} />
+          <TextField label="Suffix" value={data.unitSuffix} onCommit={(v) => set((d) => void (d.data.unitSuffix = v))} />
+        </div>
+        <ToggleField label="Compact notation (1.2K)" value={data.compactNotation} onChange={(v) => set((d) => void (d.data.compactNotation = v))} />
+      </Section>
+
+      <Section title="Geometry">
+        {isBar && (
+          <>
+            <SliderField label="Top corner radius" value={g.barRadius[0]} min={0} max={48} format={px} onChange={(v) => set((d) => void ((d.geometry.barRadius[0] = v), (d.geometry.barRadius[1] = v)))} />
+            <SliderField label="Bottom corner radius" value={g.barRadius[2]} min={0} max={48} format={px} onChange={(v) => set((d) => void ((d.geometry.barRadius[2] = v), (d.geometry.barRadius[3] = v)))} />
+            <SliderField label="Bar gap" value={g.barGapRatio} min={0} max={0.9} step={0.01} format={pct} onChange={(v) => set((d) => void (d.geometry.barGapRatio = v))} />
+          </>
+        )}
+        {isLine && (
+          <>
+            <SliderField label="Stroke width" value={g.strokeWidth} min={1} max={16} format={px} onChange={(v) => set((d) => void (d.geometry.strokeWidth = v))} />
+            <SliderField label="Curve smoothness" value={g.curveTension} min={0} max={1} step={0.01} format={pct} onChange={(v) => set((d) => void (d.geometry.curveTension = v))} />
+          </>
+        )}
+        {type === "donut" && (
+          <SliderField label="Donut hole" value={g.donutInnerRatio} min={0.2} max={0.9} step={0.01} format={pct} onChange={(v) => set((d) => void (d.geometry.donutInnerRatio = v))} />
+        )}
+        {isRadial && (
+          <SliderField label="Group slices below" value={g.groupSmallSlicesBelowPct} min={0} max={15} step={0.5} format={(v) => (v === 0 ? "off" : `${v}%`)} onChange={(v) => set((d) => void (d.geometry.groupSmallSlicesBelowPct = v))} />
+        )}
+        <ToggleField label="Data labels" value={g.showDataLabels} onChange={(v) => set((d) => void (d.geometry.showDataLabels = v))} />
+      </Section>
+
+      {!isRadial && (
+        <Section title="Axes & grid">
+          <AxisBound label="Axis min" value={g.yMin} onChange={(v) => set((d) => void (d.geometry.yMin = v))} />
+          <AxisBound label="Axis max" value={g.yMax} onChange={(v) => set((d) => void (d.geometry.yMax = v))} />
+          <ToggleField label="Axis break mark" value={g.showAxisBreak} onChange={(v) => set((d) => void (d.geometry.showAxisBreak = v))} />
+          <ToggleField label="Gridlines" value={g.showGridlines} onChange={(v) => set((d) => void (d.geometry.showGridlines = v))} />
+          <SliderField label="Gridline opacity" value={g.gridlineOpacity} min={0} max={0.5} step={0.01} format={pct} onChange={(v) => set((d) => void (d.geometry.gridlineOpacity = v))} />
+        </Section>
+      )}
+    </div>
+  );
+}
