@@ -14,9 +14,12 @@ export const FONTS: Record<FontFamilyId, FontDef> = {
   inter: { id: "inter", label: "Inter", family: "Inter", stack: "Inter, system-ui, sans-serif" },
   lora: { id: "lora", label: "Lora (serif)", family: "Lora", stack: "Lora, Georgia, serif" },
   "space-grotesk": { id: "space-grotesk", label: "Space Grotesk", family: "Space Grotesk", stack: "Space Grotesk, system-ui, sans-serif" },
+  // The uploaded font's bytes live in doc.brand.customFont; this entry only names the registered family.
+  custom: { id: "custom", label: "Custom upload", family: "RCCustomFont", stack: "RCCustomFont, Inter, system-ui, sans-serif" },
 };
 
-export const FONT_IDS = Object.keys(FONTS) as FontFamilyId[];
+/** The curated presets (everything except the upload slot). */
+export const FONT_IDS = (Object.keys(FONTS) as FontFamilyId[]).filter((id) => id !== "custom");
 
 /** Unknown ids (e.g. a stale saved kit) fall back to Inter. */
 export const fontDef = (id: string | undefined): FontDef => (id && id in FONTS ? FONTS[id as FontFamilyId] : FONTS.inter);

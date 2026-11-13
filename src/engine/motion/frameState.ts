@@ -1,6 +1,6 @@
 import type { ChartDocument } from "../../model/types";
 import { cubicBezier, springPeakSec, springProgress } from "./easing";
-import { buildTimeline } from "./timeline";
+import { buildNaturalTimeline, totalOverrideMs } from "./timeline";
 
 /**
  * Everything the geometry builders need to draw one instant. Plain serialisable data (no functions,
@@ -43,9 +43,13 @@ export const gridAlpha = (f: FrameState, j: number, n: number): number => clamp0
 export function computeFrameState(doc: ChartDocument, timeMs: number): FrameState {
   const m = doc.motion;
   if (!m.enabled) return FINAL_FRAME;
-  const tl = buildTimeline(doc);
-  const total = Math.max(1, tl.totalMs);
-  const t = timeMs >= total ? timeMs % total : Math.max(0, timeMs);
+  // Evaluate the natural timeline at t / scale: a total-duration override is a uniform time-warp.
+  const tl = buildNaturalTimeline(doc);
+  const natTotal = Math.max(1, tl.totalMs);
+  const total = Math.max(1, totalOverrideMs(doc) ?? natTotal);
+  const scale = total / natTotal;
+  const shown = timeMs >= total ? timeMs % total : Math.max(0, timeMs);
+  const t = shown / scale;
 
   const ease = m.physicsMode === "spring" ? (x: number) => springProgress((x * tl.trackMs) / 1000, m.springStiffness, m.springDamping) : cubicBezier(...m.easing);
   const items = tl.delays.map((d) => {
@@ -61,9 +65,9 @@ export function computeFrameState(doc: ChartDocument, timeMs: number): FrameStat
     return !m.numberRollUp || local >= peakLocal ? 1 : clamp01(items[i]!);
   });
 
-  const resetMs = total - tl.holdEndMs;
+  const resetMs = natTotal - tl.holdEndMs;
   const fade = resetMs > 0 && t > tl.holdEndMs ? 1 - fadeEase((t - tl.holdEndMs) / resetMs) : 1;
   const grid = (tl.stageMs > 0 ? stageEase(t / tl.stageMs) : 1) * fade;
 
-  return { timeMs: t, totalMs: total, grid, items, roll, fade };
+  return { timeMs: shown, totalMs: total, grid, items, roll, fade };
 }

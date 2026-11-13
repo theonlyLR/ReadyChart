@@ -3,6 +3,7 @@ import type { ChartDocument, ContrastBackdrop } from "../../model/types";
 import { FONT_IDS, FONTS } from "../../engine/fonts";
 import { resolveLogoTreatment } from "../../brand/contrast";
 import { ingestLogo, LOGO_MIME_TYPES } from "../../brand/logoIngest";
+import { FONT_ACCEPT, ingestFont } from "../../brand/fontIngest";
 import { useDocumentStore } from "../../store/documentStore";
 import { Section, SelectField, SliderField } from "./fields";
 
@@ -32,6 +33,8 @@ export function BrandSection() {
   // Ephemeral UI only: the upload error message and drag-hover highlight. The logo itself lives in the document.
   const [error, setError] = useState<string | null>(null);
   const [over, setOver] = useState(false);
+  const fontInputRef = useRef<HTMLInputElement>(null);
+  const [fontNote, setFontNote] = useState<{ kind: "error" | "warn"; text: string } | null>(null);
   const treatment = resolveLogoTreatment(doc);
 
   const upload = async (file: File | undefined) => {
@@ -48,6 +51,28 @@ export function BrandSection() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load that logo.");
     }
+  };
+
+  const uploadFont = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const { font, warning } = await ingestFont(file);
+      setFontNote(warning ? { kind: "warn", text: warning } : null);
+      update((d) => {
+        d.brand.customFont = font;
+        d.brand.fontFamily = "custom";
+      });
+    } catch (e) {
+      setFontNote({ kind: "error", text: e instanceof Error ? e.message : "Could not load that font." });
+    }
+  };
+
+  const removeFont = () => {
+    setFontNote(null);
+    update((d) => {
+      delete d.brand.customFont;
+      if (d.brand.fontFamily === "custom") d.brand.fontFamily = "inter";
+    });
   };
 
   const remove = () =>
@@ -130,7 +155,28 @@ export function BrandSection() {
         </>
       )}
 
-      <SelectField label="Typeface" value={brand.fontFamily} options={FONT_IDS.map((id) => ({ value: id, label: FONTS[id].label }))} onChange={(v) => update((d) => void (d.brand.fontFamily = v))} />
+      <SelectField
+        label="Typeface"
+        value={brand.fontFamily}
+        options={[
+          ...FONT_IDS.map((id) => ({ value: id, label: FONTS[id].label })),
+          ...(brand.customFont ? [{ value: "custom" as const, label: `${brand.customFont.name} (uploaded)` }] : []),
+        ]}
+        onChange={(v) => update((d) => void (d.brand.fontFamily = v))}
+      />
+      <div className="flex items-center gap-2">
+        <input ref={fontInputRef} type="file" accept={FONT_ACCEPT} aria-label="Upload font file" className="hidden" onChange={(e) => (void uploadFont(e.target.files?.[0]), (e.target.value = ""))} />
+        <button className="rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium hover:bg-slate-50" onClick={() => fontInputRef.current?.click()}>
+          Upload font…
+        </button>
+        {brand.customFont && (
+          <button className="text-xs font-medium text-rose-600 hover:underline" onClick={removeFont}>
+            Remove font
+          </button>
+        )}
+        <span className="text-[11px] text-slate-400">.woff2 .woff .ttf .otf</span>
+      </div>
+      {fontNote && <p className={`text-xs ${fontNote.kind === "error" ? "text-rose-600" : "text-amber-700"}`}>{fontNote.text}</p>}
     </Section>
   );
 }

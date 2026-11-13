@@ -6,6 +6,8 @@ export interface WorkerRequest {
   doc: ChartDocument;
   format: WorkerFormat;
   fps: number;
+  /** false = the file plays once and stops. */
+  loop: boolean;
   scale: number;
   /** 0..1, WebP only. */
   quality: number;
@@ -13,7 +15,7 @@ export interface WorkerRequest {
   maxBytes?: number;
   /** CSS family name the buffers below are registered under (the doc's brand font). */
   fontFamily: string;
-  fonts: { weight: number; data: ArrayBuffer }[];
+  fonts: { weight: number; data: ArrayBuffer; /** CSS weight descriptor override, e.g. "100 900" for an uploaded variable-weight font. */ weightRange?: string }[];
 }
 
 export type WorkerMessage =

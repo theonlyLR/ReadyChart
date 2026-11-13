@@ -23,10 +23,29 @@ export function frameDelays(totalMs: number, count: number, unitMs: number): num
   return Array.from({ length: count }, (_, i) => edge(i + 1) - edge(i));
 }
 
+/** Delays (in `unitMs` steps) for frames starting at `times`; the last frame lasts until `endMs`. Cumulative rounding, no drift. */
+export function delaysFor(times: number[], endMs: number, unitMs: number): number[] {
+  const edge = (i: number) => Math.round((i < times.length ? times[i]! : endMs) / unitMs);
+  return times.map((_, i) => edge(i + 1) - edge(i));
+}
+
+/**
+ * Frame plan for an export. Loop: one full cycle [0, totalMs). No loop: plays once and stops, matching live
+ * playback (which halts at holdEndMs), so the file ends on the held final frame and never shows the loop-reset fade.
+ */
+export function playbackPlan(totalMs: number, holdEndMs: number, fps: number, loop: boolean): { times: number[]; endMs: number } {
+  if (loop) return { times: frameTimes(totalMs, fps), endMs: totalMs };
+  const last = holdEndMs >= totalMs ? totalMs - 1e-3 : holdEndMs; // t = totalMs would wrap to 0
+  const count = Math.max(2, Math.round((last * fps) / 1000) + 1);
+  return { times: Array.from({ length: count }, (_, i) => (i * last) / (count - 1)), endMs: last + 1000 / fps };
+}
+
 export interface FrameRenderer {
   width: number;
   height: number;
   totalMs: number;
+  /** End of the hold phase: where non-looping playback stops. */
+  holdEndMs: number;
   /** t at which every hero track has settled: the palette sample point for GIF. */
   settledMs: number;
   /** Draws computeFrameState(doc, t) and returns its pixels. The returned buffer is fresh: drop it after encoding. */
@@ -51,6 +70,7 @@ export async function createFrameRenderer(doc: ChartDocument, scale: number, mea
     width: w,
     height: h,
     totalMs: tl.totalMs,
+    holdEndMs: tl.holdEndMs,
     settledMs: tl.heroEndMs,
     render(tMs) {
       ctx.clearRect(0, 0, w, h);

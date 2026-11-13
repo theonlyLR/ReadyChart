@@ -87,3 +87,29 @@ export function removeSeries(data: Data, seriesIndex: number): void {
   if (data.series.length <= 1) return;
   data.series.splice(seriesIndex, 1);
 }
+
+/** Rename a series. Blank names fall back to "Series N" so legends never show an empty entry. */
+export function setSeriesName(data: Data, seriesIndex: number, name: string): void {
+  const s = data.series[seriesIndex];
+  if (!s) return;
+  s.name = name.trim() || `Series ${seriesIndex + 1}`;
+}
+
+/** Set (hex) or clear (null) one pie/donut slice color. Overrides live on series[0], keyed by label index. */
+export function setSliceColor(data: Data, labelIndex: number, color: string | null): void {
+  const s = data.series[0];
+  if (!s || labelIndex < 0 || labelIndex >= data.labels.length) return;
+  if (color === null) {
+    if (s.pointColorOverrides) {
+      delete s.pointColorOverrides[labelIndex];
+      if (Object.keys(s.pointColorOverrides).length === 0) delete s.pointColorOverrides;
+    }
+    return;
+  }
+  (s.pointColorOverrides ??= {})[labelIndex] = color;
+}
+
+export function clearSliceColors(data: Data): void {
+  const s = data.series[0];
+  if (s) delete s.pointColorOverrides;
+}

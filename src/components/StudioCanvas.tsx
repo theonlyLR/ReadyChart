@@ -23,9 +23,10 @@ export function StudioCanvas() {
   const fontFamily = doc.brand.fontFamily;
 
   // Brand fonts load lazily; once ready the store bumps fontsVersion and the scene re-measures.
+  const customFont = doc.brand.customFont;
   useEffect(() => {
-    void loadFontFamily(fontFamily);
-  }, [fontFamily]);
+    void loadFontFamily(fontFamily, customFont);
+  }, [fontFamily, customFont]);
   const playheadMs = useUiStore((s) => s.playheadMs);
 
   // fontsReady is a deliberate dependency: re-measure once Inter is available.

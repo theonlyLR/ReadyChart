@@ -1,12 +1,16 @@
 import { GIFEncoder, applyPalette, quantize } from "gifenc";
 import type { Palette } from "gifenc";
-import { frameDelays } from "../frames";
+import { delaysFor } from "../frames";
 import type { FrameRenderer } from "../frames";
 
 export interface GifOptions {
   fps: number;
   transparent: boolean;
   frameTimes: number[];
+  /** Time the last frame stays up until (defaults to the loop length). */
+  endMs?: number;
+  /** false = play once and stop (NETSCAPE loop block omitted). Default true. */
+  loop?: boolean;
   maxBytes?: number;
   onProgress?: (done: number, total: number) => void;
 }
@@ -20,7 +24,8 @@ export type GifResult = { bytes: Uint8Array } | { over: number };
 export function encodeGif(r: FrameRenderer, o: GifOptions): GifResult {
   const { width, height } = r;
   const times = o.frameTimes;
-  const delaysCs = frameDelays(r.totalMs, times.length, 10).map((cs) => Math.max(2, cs));
+  const delaysCs = delaysFor(times, o.endMs ?? r.totalMs, 10).map((cs) => Math.max(2, cs));
+  const repeat = o.loop === false ? -1 : 0; // gifenc: -1 = once (no NETSCAPE block), 0 = forever
   const fmt = o.transparent ? "rgba4444" : "rgb565";
 
   // Lock the palette. Opaque charts reserve the last slot for "unchanged pixel" transparency between frames.
@@ -40,7 +45,7 @@ export function encodeGif(r: FrameRenderer, o: GifOptions): GifResult {
     const delay = delaysCs[i]! * 10;
     if (o.transparent) {
       // Index `clearIdx` is real transparency here, so each frame replaces the last (dispose = restore to background).
-      enc.writeFrame(idx, width, height, { palette: i === 0 ? rgbPalette : undefined, delay, transparent: true, transparentIndex: clearIdx, dispose: 2 });
+      enc.writeFrame(idx, width, height, { palette: i === 0 ? rgbPalette : undefined, repeat, delay, transparent: true, transparentIndex: clearIdx, dispose: 2 });
     } else {
       let out = idx;
       if (prev) {
@@ -48,7 +53,7 @@ export function encodeGif(r: FrameRenderer, o: GifOptions): GifResult {
         out = new Uint8Array(idx.length);
         for (let p = 0; p < idx.length; p++) out[p] = idx[p] === prev[p] ? clearIdx : idx[p]!;
       }
-      enc.writeFrame(out, width, height, { palette: i === 0 ? rgbPalette : undefined, delay, transparent: i > 0, transparentIndex: clearIdx, dispose: 1 });
+      enc.writeFrame(out, width, height, { palette: i === 0 ? rgbPalette : undefined, repeat, delay, transparent: i > 0, transparentIndex: clearIdx, dispose: 1 });
       prev = idx;
     }
     const size = enc.bytesView().length;

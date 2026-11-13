@@ -7,13 +7,14 @@ interface Props {
   placeholder?: string;
   ariaLabel?: string;
   inputMode?: "text" | "decimal";
+  selectOnFocus?: boolean;
 }
 
 /**
  * Text input that edits a throwaway draft and writes to the ChartDocument once, on Enter/blur,
  * so typing a value is one undo step rather than one per keystroke. Escape reverts.
  */
-export function CommitInput({ value, onCommit, className, placeholder, ariaLabel, inputMode }: Props) {
+export function CommitInput({ value, onCommit, className, placeholder, ariaLabel, inputMode, selectOnFocus }: Props) {
   const [draft, setDraft] = useState<string | null>(null);
   const cancelled = useRef(false);
 
@@ -31,6 +32,7 @@ export function CommitInput({ value, onCommit, className, placeholder, ariaLabel
       inputMode={inputMode}
       value={draft ?? value}
       onChange={(e) => setDraft(e.target.value)}
+      onFocus={selectOnFocus ? (e) => e.currentTarget.select() : undefined}
       onBlur={finish}
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();

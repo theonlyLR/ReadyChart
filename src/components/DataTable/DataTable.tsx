@@ -1,6 +1,7 @@
 import { Plus, X } from "lucide-react";
 import type { CellProvenance } from "../../model/types";
-import { addRow, addSeries, parseCellNumber, removeRow, removeSeries, setCell, setLabel } from "../../model/dataOps";
+import { addRow, addSeries, parseCellNumber, removeRow, removeSeries, setCell, setLabel, setSeriesName, setSliceColor } from "../../model/dataOps";
+import { SERIES_PALETTE } from "../../model/defaults";
 import { useDocumentStore } from "../../store/documentStore";
 import { CommitInput } from "../CommitInput";
 import { ColorField } from "../Inspector/fields";
@@ -18,6 +19,7 @@ const cell = "w-full min-w-0 rounded border border-transparent bg-transparent px
 export function DataTable() {
   const data = useDocumentStore((s) => s.doc.data);
   const update = useDocumentStore((s) => s.update);
+  const radial = useDocumentStore((s) => s.doc.geometry.type === "pie" || s.doc.geometry.type === "donut");
 
   return (
     <section className="p-3">
@@ -40,7 +42,8 @@ export function DataTable() {
                     ariaLabel={`Series ${si + 1} name`}
                     className={`${cell} font-medium`}
                     value={s.name}
-                    onCommit={(v) => update((d) => void (d.data.series[si]!.name = v))}
+                    selectOnFocus
+                    onCommit={(v) => update((d) => setSeriesName(d.data, si, v))}
                   />
                   {data.series.length > 1 && (
                     <button aria-label={`Remove ${s.name}`} className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-rose-600" onClick={() => update((d) => removeSeries(d.data, si))}>
@@ -57,7 +60,16 @@ export function DataTable() {
           {data.labels.map((label, i) => (
             <tr key={i} className="border-t border-slate-100">
               <td>
-                <CommitInput ariaLabel={`Label ${i + 1}`} className={cell} value={label} onCommit={(v) => update((d) => setLabel(d.data, i, v))} />
+                <div className="flex items-center gap-1">
+                  {radial && (
+                    <ColorField
+                      ariaLabel={`${label} slice color`}
+                      value={data.series[0]?.pointColorOverrides?.[i] ?? SERIES_PALETTE[i % SERIES_PALETTE.length]!}
+                      onChange={(c) => update((d) => setSliceColor(d.data, i, c))}
+                    />
+                  )}
+                  <CommitInput ariaLabel={`Label ${i + 1}`} className={cell} value={label} onCommit={(v) => update((d) => setLabel(d.data, i, v))} />
+                </div>
               </td>
               {data.series.map((s, si) => (
                 <td key={s.id} className={TINT[s.provenance[i] ?? "USER_INPUT"]} title={s.provenance[i]}>

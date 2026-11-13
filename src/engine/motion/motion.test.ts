@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { MICRO_SLICE_PIE_FIXTURE } from "../../../fixtures/goldenDatasets";
-import { createDocumentFromColumns } from "../../model/defaults";
+import { createDefaultDocument, createDocumentFromColumns } from "../../model/defaults";
 import type { ChartDocument } from "../../model/types";
 import { createApproxMeasurer } from "../textMeasure";
 import { buildScene } from "../scene";
 import { cubicBezier, springProgress, springSettleMs } from "./easing";
 import { FINAL_FRAME, computeFrameState } from "./frameState";
-import { buildTimeline, staggerRanks } from "./timeline";
+import { buildNaturalTimeline, buildTimeline, staggerRanks } from "./timeline";
 
 const m = createApproxMeasurer();
 const mk = (type: ChartDocument["geometry"]["type"] = "bar", values = [10, 40, 20, 30, 5]): ChartDocument => {
@@ -178,5 +178,33 @@ describe("scene at a frame", () => {
     const full = buildScene(d, m).nodes.filter((n) => n.kind === "path");
     const part = buildScene(d, m, { ...FINAL_FRAME, items: [0.5, 0], roll: [0.5, 0] }).nodes.filter((n) => n.kind === "path");
     expect(part.length).toBe(full.length - 1);
+  });
+});
+
+describe("total duration override", () => {
+  const withMotion = (total: number | null) => {
+    const doc = createDefaultDocument();
+    doc.motion.enabled = true;
+    doc.motion.totalDurationMs = total;
+    return doc;
+  };
+  it("null = auto: timeline equals the natural one", () => {
+    const doc = withMotion(null);
+    expect(buildTimeline(doc)).toEqual(buildNaturalTimeline(doc));
+    expect(buildTimeline(doc).scale).toBe(1);
+  });
+  it("override sets totalMs, clamps, and time-warps frame state deterministically", () => {
+    const auto = withMotion(null);
+    const nat = buildNaturalTimeline(auto);
+    const doc = withMotion(nat.totalMs * 2);
+    expect(buildTimeline(doc).totalMs).toBe(nat.totalMs * 2);
+    // Same visual state at the same fraction of the loop.
+    const a = computeFrameState(auto, nat.heroEndMs * 0.5);
+    const b = computeFrameState(doc, nat.heroEndMs);
+    expect(b.items).toEqual(a.items);
+    expect(b.totalMs).toBe(nat.totalMs * 2);
+    expect(computeFrameState(doc, 1234)).toEqual(computeFrameState(doc, 1234));
+    expect(buildTimeline(withMotion(1)).totalMs).toBe(500);
+    expect(buildTimeline(withMotion(99999)).totalMs).toBe(10000);
   });
 });

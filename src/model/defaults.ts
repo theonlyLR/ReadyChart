@@ -66,6 +66,7 @@ export function createDefaultDocument(): ChartDocument {
       numberRollUp: true,
       holdEndMs: 1000,
       loopResetMs: 400,
+      totalDurationMs: null,
     },
     brand: {
       logoDataUrl: null,

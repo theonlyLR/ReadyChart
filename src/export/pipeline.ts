@@ -2,6 +2,7 @@ import type { ChartDocument } from "../model/types";
 import { buildScene } from "../engine/scene";
 import { fontDef } from "../engine/fonts";
 import { getMeasurer } from "../render/measurer";
+import { registerCustomFont } from "../render/fontLoader";
 import { getEmbeddedFontCss, getFontBuffers } from "./fontEmbed";
 import type { WorkerMessage, WorkerRequest } from "./animated/protocol";
 import { rasterize } from "./raster";
@@ -27,11 +28,12 @@ async function ensureFonts(family: string): Promise<void> {
  */
 export async function renderStatic(doc: ChartDocument, opts: ExportOptions): Promise<Blob> {
   const font = fontDef(doc.brand.fontFamily);
+  if (doc.brand.fontFamily === "custom") await registerCustomFont(doc.brand.customFont);
   await ensureFonts(font.family);
   const { nodes } = buildScene(doc, getMeasurer(font.id));
   const { width, height, transparent } = doc.canvas;
   if (opts.format === "svg") {
-    const svg = serializeSvg(nodes, width, height, await getEmbeddedFontCss(font.id), font.stack);
+    const svg = serializeSvg(nodes, width, height, await getEmbeddedFontCss(font.id, doc.brand.customFont), font.stack);
     return new Blob([svg], { type: "image/svg+xml" });
   }
   return rasterize(nodes, { format: opts.format, scale: opts.scale, width, height, transparent, fontFamily: font.stack });
@@ -41,6 +43,8 @@ export interface AnimatedOptions {
   format: AnimatedFormat;
   fps: number;
   scale: number;
+  /** false = the file plays once and stops. Default true. */
+  loop?: boolean;
   /** 0..1, WebP only. */
   quality?: number;
   /** Stop early (result.over) once the output would exceed this. */
@@ -57,7 +61,7 @@ export type AnimatedResult = { blob: Blob } | { over: number };
  */
 export async function renderAnimated(doc: ChartDocument, o: AnimatedOptions): Promise<AnimatedResult> {
   const font = fontDef(doc.brand.fontFamily);
-  const fonts = await getFontBuffers(font.id);
+  const fonts = await getFontBuffers(font.id, doc.brand.customFont);
   if (o.signal?.aborted) throw new DOMException("Aborted", "AbortError");
   const worker = new Worker(new URL("./animated/worker.ts", import.meta.url), { type: "module" });
   return new Promise<AnimatedResult>((resolve, reject) => {
@@ -82,7 +86,7 @@ export async function renderAnimated(doc: ChartDocument, o: AnimatedOptions): Pr
       finish();
       reject(new Error(e.message || "Export worker failed"));
     };
-    const req: WorkerRequest = { doc, format: o.format, fps: o.fps, scale: o.scale, quality: o.quality ?? 0.8, maxBytes: o.maxBytes, fontFamily: font.id, fonts };
+    const req: WorkerRequest = { doc, format: o.format, fps: o.fps, loop: o.loop ?? true, scale: o.scale, quality: o.quality ?? 0.8, maxBytes: o.maxBytes, fontFamily: font.id, fonts };
     worker.postMessage(req, fonts.map((f) => f.data));
   });
 }

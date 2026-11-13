@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { frameDelays, frameTimes } from "./frames";
+import { delaysFor, frameDelays, frameTimes, playbackPlan } from "./frames";
 import type { FrameRenderer } from "./frames";
 import { encodeGif } from "./animated/gif";
 import { frameDataChunks, muxAnimatedWebp } from "./webpMux";
@@ -101,6 +101,7 @@ function fakeRenderer(w: number, h: number, totalMs: number): FrameRenderer {
     width: w,
     height: h,
     totalMs,
+    holdEndMs: totalMs * 0.8,
     settledMs: 500,
     render(t) {
       const data = new Uint8ClampedArray(w * h * 4);
@@ -137,5 +138,45 @@ describe("GIF encoder", () => {
     const res = encodeGif(r, { fps: 25, transparent: true, frameTimes: frameTimes(400, 25) });
     if (!("bytes" in res)) throw new Error("unexpected abort");
     expect(inspectGif(res.bytes).localTables).toBe(0);
+  });
+});
+
+describe("loop control", () => {
+  it("GIF writes a NETSCAPE loop block only when looping", () => {
+    const hasNetscape = (b: Uint8Array) => new TextDecoder("latin1").decode(b).includes("NETSCAPE2.0");
+    const r = fakeRenderer(8, 8, 400);
+    const run = (loop: boolean) => {
+      const res = encodeGif(r, { fps: 25, transparent: false, frameTimes: frameTimes(400, 25), loop });
+      if (!("bytes" in res)) throw new Error("unexpected abort");
+      return res.bytes;
+    };
+    expect(hasNetscape(run(true))).toBe(true);
+    expect(hasNetscape(run(false))).toBe(false);
+  });
+
+  it("non-loop plan ends on the held frame, before the reset fade", () => {
+    const loop = playbackPlan(3000, 2400, 25, true);
+    expect(loop.times.at(-1)!).toBeLessThan(3000);
+    expect(loop.endMs).toBe(3000);
+    const once = playbackPlan(3000, 2400, 25, false);
+    expect(once.times[0]).toBe(0);
+    expect(once.times.at(-1)).toBeCloseTo(2400, 6);
+    expect(once.endMs).toBeCloseTo(2440, 6);
+    expect(playbackPlan(3000, 3000, 25, false).times.at(-1)!).toBeLessThan(3000);
+  });
+
+  it("delaysFor reproduces frameDelays for a loop and sums to the span", () => {
+    const t = frameTimes(1000, 30);
+    expect(delaysFor(t, 1000, 10)).toEqual(frameDelays(1000, t.length, 10));
+  });
+
+  it("ANIM chunk carries the loop count", () => {
+    const still = new Uint8Array([...Array.from("RIFF", (c) => c.charCodeAt(0)), 0, 0, 0, 0, ...Array.from("WEBP", (c) => c.charCodeAt(0)), ...Array.from("VP8 ", (c) => c.charCodeAt(0)), 4, 0, 0, 0, 1, 2, 3, 4]);
+    const find = (b: Uint8Array) => {
+      for (let i = 0; i < b.length - 14; i++) if (String.fromCharCode(b[i]!, b[i + 1]!, b[i + 2]!, b[i + 3]!) === "ANIM") return b[i + 12]! | (b[i + 13]! << 8);
+      return -1;
+    };
+    expect(find(muxAnimatedWebp([{ webp: still, durationMs: 40 }], 2, 2, false))).toBe(0);
+    expect(find(muxAnimatedWebp([{ webp: still, durationMs: 40 }], 2, 2, false, 1))).toBe(1);
   });
 });

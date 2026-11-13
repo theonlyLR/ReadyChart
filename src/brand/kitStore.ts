@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { ChartDocument } from "../model/types";
 import { useDocumentStore } from "../store/documentStore";
-import { applyKitToDraft, KIT_STORAGE_KEY, kitFromDoc, MAX_KITS, parseKits, serializeKits } from "./kits";
+import { applyKitToDraft, customFontTooLargeForKit, KIT_STORAGE_KEY, kitFromDoc, MAX_KITS, parseKits, serializeKits } from "./kits";
 import type { BrandKit } from "./kits";
 
 type KitStorage = Pick<Storage, "getItem" | "setItem">;
@@ -66,7 +66,9 @@ export const useKitStore = create<KitState>((set, get) => {
         set({ error: `The vault holds up to ${MAX_KITS} kits. Delete one first.` });
         return false;
       }
-      return commit([...kits, kitFromDoc(doc, name, newId())]);
+      const ok = commit([...kits, kitFromDoc(doc, name, newId())]);
+      if (ok && customFontTooLargeForKit(doc)) set({ error: "Kit saved, but its uploaded font is over 1.5 MB, so the kit uses Inter instead. Use a smaller font file to include it." });
+      return ok;
     },
     rename: (id, name) => {
       const trimmed = name.trim();

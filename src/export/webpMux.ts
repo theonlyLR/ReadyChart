@@ -49,9 +49,9 @@ export interface MuxFrame {
   durationMs: number;
 }
 
-export function muxAnimatedWebp(frames: MuxFrame[], width: number, height: number, hasAlpha: boolean): Uint8Array {
+export function muxAnimatedWebp(frames: MuxFrame[], width: number, height: number, hasAlpha: boolean, loopCount = 0): Uint8Array {
   const vp8x = chunk("VP8X", [(hasAlpha ? 0x10 : 0) | 0x02, 0, 0, 0, ...u24(width - 1), ...u24(height - 1)]);
-  const anim = chunk("ANIM", [0, 0, 0, 0, 0, 0]); // background colour (transparent), loop count 0 = forever
+  const anim = chunk("ANIM", [0, 0, 0, 0, loopCount & 0xff, (loopCount >> 8) & 0xff]); // background colour (transparent), loop count (u16 LE): 0 = forever, 1 = once
   const anmf = frames.map((f) =>
     // x, y offsets (0), frame size, duration, flags: bit1 = do not blend, bit0 = dispose none.
     chunk("ANMF", concat([new Uint8Array([0, 0, 0, 0, 0, 0, ...u24(width - 1), ...u24(height - 1), ...u24(Math.max(0, f.durationMs)), 0b10]), frameDataChunks(f.webp)])),

@@ -39,7 +39,7 @@ function Segmented<T extends string | number>({ label, value, options, onChange 
 
 export function FlightCheckModal() {
   const doc = useDocumentStore((s) => s.doc);
-  const { exportFormat: format, exportScale: scale, exportFps: fps, backdrop, safeZone: platform, setExport, setFlightCheckOpen } = useUiStore();
+  const { exportFormat: format, exportScale: scale, exportFps: fps, backdrop, safeZone: platform, loop, setLoop, setExport, setFlightCheckOpen } = useUiStore();
   const [preview, setPreview] = useState<{ blob: Blob; url: string } | null>(null);
   const [busy, setBusy] = useState(true);
   const [progress, setProgress] = useState<number | null>(null);
@@ -65,7 +65,7 @@ export function FlightCheckModal() {
     const ctl = new AbortController();
     abortRef.current?.abort();
     abortRef.current = ctl;
-    const key = `${format}|${scale}|${fps}`;
+    const key = `${format}|${scale}|${fps}|${loop}`;
     const ready = readyRef.current;
     if (ready && ready.doc === doc && ready.key === key) {
       readyRef.current = null;
@@ -84,7 +84,7 @@ export function FlightCheckModal() {
       if (isAnimated(format)) {
         await new Promise((r) => setTimeout(r, 350)); // debounce slider drags before spinning up a worker
         if (ctl.signal.aborted) return;
-        const res = await renderAnimated(doc, { format, fps, scale, signal: ctl.signal, onProgress: (d, t) => setProgress(d / t) });
+        const res = await renderAnimated(doc, { format, fps, scale, loop, signal: ctl.signal, onProgress: (d, t) => setProgress(d / t) });
         if ("blob" in res) showBlob(res.blob);
       } else {
         showBlob(await renderStatic(doc, { format, scale }));
@@ -101,7 +101,7 @@ export function FlightCheckModal() {
         }
       });
     return () => ctl.abort();
-  }, [doc, format, scale, fps, animated, motionOn]);
+  }, [doc, format, scale, fps, loop, animated, motionOn]);
 
   useEffect(
     () => () => {
@@ -136,9 +136,9 @@ export function FlightCheckModal() {
         for (const step of ladder) {
           setFitNote(`Trying ${step.fps} fps at ${step.scale}×…`);
           setProgress(0);
-          const res = await renderAnimated(doc, { format, ...step, maxBytes: BUDGET_BYTES, signal: ctl.signal, onProgress: (d, t) => setProgress(d / t) });
+          const res = await renderAnimated(doc, { format, ...step, loop, maxBytes: BUDGET_BYTES, signal: ctl.signal, onProgress: (d, t) => setProgress(d / t) });
           if ("blob" in res && res.blob.size <= BUDGET_BYTES) {
-            readyRef.current = { doc, key: `${format}|${step.scale}|${step.fps}`, blob: res.blob };
+            readyRef.current = { doc, key: `${format}|${step.scale}|${step.fps}|${loop}`, blob: res.blob };
             setExport({ exportScale: step.scale, exportFps: step.fps });
             setFitNote(`Fits at ${step.fps} fps, ${step.scale}× (${formatBytes(res.blob.size)}).`);
             return;
@@ -224,6 +224,12 @@ export function FlightCheckModal() {
               onChange={(v) => setExport({ exportFps: v })}
               options={FPS_OPTIONS[format as AnimatedFormat].map((f) => ({ value: f, label: `${f} fps` }))}
             />
+          )}
+          {animated && (
+            <label className="flex items-center justify-between text-xs font-medium text-slate-600">
+              <span>Loop (off = plays once and stops)</span>
+              <input type="checkbox" aria-label="Loop" className="h-4 w-4 accent-indigo-600" checked={loop} onChange={(e) => setLoop(e.target.checked)} />
+            </label>
           )}
           {format === "gif" && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">

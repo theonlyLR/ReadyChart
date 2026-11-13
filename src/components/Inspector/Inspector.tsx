@@ -1,7 +1,8 @@
 import { ASPECT_PRESETS } from "../../model/defaults";
 import type { AspectPreset, ChartDocument } from "../../model/types";
-import { parseCellNumber } from "../../model/dataOps";
-import { buildTimeline } from "../../engine/motion/timeline";
+import { clearSliceColors, parseCellNumber, setSliceColor } from "../../model/dataOps";
+import { SERIES_PALETTE } from "../../model/defaults";
+import { buildNaturalTimeline, buildTimeline, TOTAL_DURATION_MAX_MS, TOTAL_DURATION_MIN_MS } from "../../engine/motion/timeline";
 import { useDocumentStore } from "../../store/documentStore";
 import { CommitInput } from "../CommitInput";
 import { BrandSection } from "./BrandSection";
@@ -97,7 +98,23 @@ function MotionControls() {
       <ToggleField label="Number roll-up" value={m.numberRollUp} onChange={(v) => set((d) => void (d.motion.numberRollUp = v))} />
       <SliderField label="Readability hold" value={m.holdEndMs} min={0} max={5000} step={100} format={ms} onChange={(v) => set((d) => void (d.motion.holdEndMs = v))} />
       <SliderField label="Loop reset" value={m.loopResetMs} min={0} max={2000} step={50} format={ms} onChange={(v) => set((d) => void (d.motion.loopResetMs = v))} />
-      <p className="text-xs text-slate-500">Loop length {(buildTimeline(doc).totalMs / 1000).toFixed(2)}s</p>
+      <SliderField
+        label="Total duration"
+        value={buildTimeline(doc).totalMs / 1000}
+        min={TOTAL_DURATION_MIN_MS / 1000}
+        max={TOTAL_DURATION_MAX_MS / 1000}
+        step={0.1}
+        format={(v) => `${v.toFixed(1)}s`}
+        onChange={(v) => set((d) => void (d.motion.totalDurationMs = Math.round(v * 1000)))}
+      />
+      <div className="flex items-center justify-between text-xs text-slate-500">
+        <span>
+          {m.totalDurationMs == null ? "Auto" : `Auto would be ${(buildNaturalTimeline(doc).totalMs / 1000).toFixed(1)}s`} · loop length {(buildTimeline(doc).totalMs / 1000).toFixed(2)}s
+        </span>
+        <button className="font-medium text-indigo-700 hover:underline disabled:text-slate-300 disabled:no-underline" disabled={m.totalDurationMs == null} onClick={() => set((d) => void (d.motion.totalDurationMs = null))}>
+          Reset to Auto
+        </button>
+      </div>
     </>
   );
 }
@@ -181,6 +198,26 @@ export function Inspector() {
         )}
         <ToggleField label="Data labels" value={g.showDataLabels} onChange={(v) => set((d) => void (d.geometry.showDataLabels = v))} />
       </Section>
+
+      {isRadial && (
+        <Section title="Slice colors">
+          {data.labels.map((label, i) => (
+            <ColorField
+              key={i}
+              label={label || `Slice ${i + 1}`}
+              value={data.series[0]?.pointColorOverrides?.[i] ?? SERIES_PALETTE[i % SERIES_PALETTE.length]!}
+              onChange={(c) => set((d) => setSliceColor(d.data, i, c))}
+            />
+          ))}
+          <button
+            className="text-xs font-medium text-indigo-700 hover:underline disabled:text-slate-300 disabled:no-underline"
+            disabled={!data.series[0]?.pointColorOverrides}
+            onClick={() => set((d) => clearSliceColors(d.data))}
+          >
+            Reset slice colors
+          </button>
+        </Section>
+      )}
 
       <Section title="Motion">
         <ToggleField label="Enable motion" value={doc.motion.enabled} onChange={(v) => set((d) => void (d.motion.enabled = v))} />

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultDocument } from "./defaults";
-import { addRow, addSeries, parseCellNumber, removeRow, removeSeries, setCell } from "./dataOps";
+import { addRow, addSeries, parseCellNumber, removeRow, removeSeries, setCell, setSeriesName, setSliceColor, clearSliceColors } from "./dataOps";
 import { seriesLengthsMatch } from "./validate";
 
 describe("parseCellNumber", () => {
@@ -34,5 +34,27 @@ describe("dataOps keep series aligned", () => {
     removeSeries(doc.data, 1);
     removeSeries(doc.data, 0);
     expect(doc.data.series).toHaveLength(1);
+  });
+});
+
+describe("series names and slice colors", () => {
+  it("renames a series and falls back for blank names", () => {
+    const doc = createDefaultDocument();
+    setSeriesName(doc.data, 0, "  Sales ");
+    expect(doc.data.series[0]!.name).toBe("Sales");
+    setSeriesName(doc.data, 0, "   ");
+    expect(doc.data.series[0]!.name).toBe("Series 1");
+  });
+
+  it("sets, clears and resets slice colors", () => {
+    const doc = createDefaultDocument();
+    setSliceColor(doc.data, 1, "#ff0000");
+    expect(doc.data.series[0]!.pointColorOverrides).toEqual({ 1: "#ff0000" });
+    setSliceColor(doc.data, 1, null);
+    expect(doc.data.series[0]!.pointColorOverrides).toBeUndefined();
+    setSliceColor(doc.data, 0, "#00ff00");
+    setSliceColor(doc.data, 2, "#0000ff");
+    clearSliceColors(doc.data);
+    expect(doc.data.series[0]!.pointColorOverrides).toBeUndefined();
   });
 });

@@ -22,6 +22,7 @@ export const MOTION_PRESETS: { id: MotionPresetId; label: string; hint: string; 
       numberRollUp: true,
       holdEndMs: 1500,
       loopResetMs: 300,
+      totalDurationMs: null,
     },
   },
   {
@@ -41,6 +42,7 @@ export const MOTION_PRESETS: { id: MotionPresetId; label: string; hint: string; 
       numberRollUp: true,
       holdEndMs: 1200,
       loopResetMs: 400,
+      totalDurationMs: null,
     },
   },
   {
@@ -60,10 +62,13 @@ export const MOTION_PRESETS: { id: MotionPresetId; label: string; hint: string; 
       numberRollUp: true,
       holdEndMs: 1200,
       loopResetMs: 400,
+      totalDurationMs: null,
     },
   },
 ];
 
+/** Presets own everything except the total-duration override, so overriding the length keeps the preset highlighted. */
 export function matchingPreset(m: MotionSettings): MotionPresetId | null {
-  return MOTION_PRESETS.find((p) => JSON.stringify(p.motion) === JSON.stringify(m))?.id ?? null;
+  const key = (x: MotionSettings) => JSON.stringify({ ...x, totalDurationMs: null });
+  return MOTION_PRESETS.find((p) => key(p.motion) === key(m))?.id ?? null;
 }

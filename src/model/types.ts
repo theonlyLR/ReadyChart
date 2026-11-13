@@ -2,7 +2,15 @@ export type ChartType = "bar" | "horizontal-bar" | "stacked-bar" | "line" | "are
 export type CellProvenance = "USER_INPUT" | "OCR_EXACT" | "AXIS_MEASURED" | "LOW_CONFIDENCE" | "MISSING";
 export type AspectPreset = "16:9" | "4:5" | "9:16" | "1:1" | "custom";
 export type ContrastBackdrop = "none" | "frosted-pill" | "auto-invert";
-export type FontFamilyId = "inter" | "lora" | "space-grotesk";
+export type FontFamilyId = "inter" | "lora" | "space-grotesk" | "custom";
+export type CustomFontFormat = "woff2" | "woff" | "ttf" | "otf";
+/** A user-uploaded font, kept as a local Data URL (never an external URL) so exports and the worker can embed it. */
+export interface CustomFont {
+  name: string;
+  format: CustomFontFormat;
+  bytes: number;
+  dataUrl: string;
+}
 export type Corners =[number, number, number, number];
 
 export interface DataSeries {
@@ -63,6 +71,8 @@ export interface ChartDocument {
     numberRollUp: boolean;
     holdEndMs: number;
     loopResetMs: number;
+    /** Total animation length override in ms (500..10000). null = Auto (derived from the settings above). */
+    totalDurationMs: number | null;
   };
   brand: {
     logoDataUrl: string | null;
@@ -77,5 +87,7 @@ export interface ChartDocument {
     /** Colour-inverted copy baked at upload, used by the auto-invert contrast mode. */
     logoInvertedDataUrl: string | null;
     fontFamily: FontFamilyId;
+    /** Present when fontFamily is "custom". */
+    customFont?: CustomFont;
   };
 }

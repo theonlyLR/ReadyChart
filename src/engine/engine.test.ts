@@ -212,3 +212,16 @@ describe("inline text targets", () => {
     expect(useDocumentStore.getState().doc.title).toBe("Quarterly Revenue");
   });
 });
+
+describe("per-slice colors", () => {
+  it("override drives slice and legend color and can be undone", () => {
+    const doc = createDocumentFromColumns(["A", "B", "C"], [10, 20, 30], "Mix", "pie");
+    const base = buildSlices(doc)[1]!.color;
+    const store = useDocumentStore;
+    store.setState({ doc, past: [], future: [], txn: null });
+    store.getState().update((d) => void (d.data.series[0]!.pointColorOverrides = { 1: "#123456" }));
+    expect(buildSlices(store.getState().doc)[1]!.color).toBe("#123456");
+    store.getState().undo();
+    expect(buildSlices(store.getState().doc)[1]!.color).toBe(base);
+  });
+});
