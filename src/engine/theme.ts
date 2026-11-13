@@ -20,7 +20,12 @@ function parseHex(c: string): [number, number, number] | null {
 export function luminance(color: string): number {
   const rgb = parseHex(color);
   if (!rgb) return 1;
-  const [r, g, b] = rgb.map((v) => {
+  return rgbLuminance(rgb[0], rgb[1], rgb[2]);
+}
+
+/** WCAG relative luminance of 0..255 sRGB channels. */
+export function rgbLuminance(r8: number, g8: number, b8: number): number {
+  const [r, g, b] = [r8, g8, b8].map((v) => {
     const s = v / 255;
     return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
   }) as [number, number, number];

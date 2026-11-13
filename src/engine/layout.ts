@@ -9,6 +9,8 @@ import { solveXLabels, solveYLabelStep } from "./collision";
 import type { LabelStrategy } from "./collision";
 import { buildSlices } from "./geometry/pie";
 import { pieGuard } from "./guards";
+import type { LogoTreatment } from "../brand/contrast";
+import { PILL_PAD_RATIO, resolveLogoTreatment } from "../brand/contrast";
 
 export interface TextBlock {
   lines: string[];
@@ -41,7 +43,12 @@ export interface LayoutResult {
   subtitle: TextBlock;
   footer: TextBlock;
   legend: { items: LegendItem[]; swatch: number; rect: Rect } | null;
+  /** Reserved safe zone: the logo plus any backdrop-pill padding. Nothing else may enter it. */
   logoBox: Rect | null;
+  /** The logo bitmap itself, inset inside logoBox (equal to it when there is no pill). */
+  logoImage: Rect | null;
+  /** How the logo is drawn (original/inverted image, optional pill). Null when there is no logo. */
+  logoTreatment: LogoTreatment | null;
   plot: Rect;
   /** Text/legend regions the plot must never intersect (safe-zone reflow checks use these). */
   regions: { text: Rect; legend: Rect | null; footer: Rect; logo: Rect | null };
@@ -92,16 +99,28 @@ export function computeLayout(doc: ChartDocument, m: TextMeasurer): LayoutResult
   // --- Brand logo safe zone -------------------------------------------------------------------
   const { brand } = doc;
   let logoBox: Rect | null = null;
-  if (brand.logoDataUrl) {
-    const size = Math.min(brand.sizePx, content.width / 3, content.height / 3);
+  let logoImage: Rect | null = null;
+  const treatment = resolveLogoTreatment(doc);
+  if (treatment) {
+    // sizePx is the logo's longest side; a frosted pill adds padding around it. The whole reserved box is
+    // clamped to a third of the content area so it can't swallow small presets.
+    const aspect = brand.logoAspect > 0 ? brand.logoAspect : 1;
+    const pad = treatment.pill ? PILL_PAD_RATIO : 0;
+    const wide = aspect >= 1;
+    const boxW = (wide ? 1 : aspect) + 2 * pad; // per unit of longest side
+    const boxH = (wide ? 1 / aspect : 1) + 2 * pad;
+    const s = Math.max(1, Math.min(brand.sizePx, content.width / 3 / boxW, content.height / 3 / boxH));
+    const w = boxW * s;
+    const h = boxH * s;
     const left = brand.anchor.endsWith("left");
     const top = brand.anchor.startsWith("top");
     logoBox = {
-      x: left ? content.x : content.x + content.width - size,
-      y: top ? content.y : content.y + content.height - size,
-      width: size,
-      height: size,
+      x: left ? content.x : content.x + content.width - w,
+      y: top ? content.y : content.y + content.height - h,
+      width: w,
+      height: h,
     };
+    logoImage = { x: logoBox.x + pad * s, y: logoBox.y + pad * s, width: w - 2 * pad * s, height: h - 2 * pad * s };
   }
   const logoTop = logoBox !== null && brand.anchor.startsWith("top");
   const logoBottom = logoBox !== null && brand.anchor.startsWith("bottom");
@@ -133,8 +152,8 @@ export function computeLayout(doc: ChartDocument, m: TextMeasurer): LayoutResult
   cursor += subLines.length * lh(fonts.subtitle);
   const textBottom = cursor;
   const textRect: Rect = { x: hx0, y: content.y, width: headerW, height: Math.max(0, textBottom - content.y) };
-  let headerBottom = textBottom;
-  if (logoTop && logoBox) headerBottom = Math.max(headerBottom, logoBox.y + logoBox.height);
+  const logoBottomY = logoTop && logoBox ? logoBox.y + logoBox.height : content.y;
+  const headerBottom = Math.max(textBottom, logoBottomY);
 
   // --- Footer ---------------------------------------------------------------------------------
   const [fx0, fx1] = shrink(logoBottom);
@@ -162,23 +181,42 @@ export function computeLayout(doc: ChartDocument, m: TextMeasurer): LayoutResult
   if (legendEntries.length) {
     const swatch = 14 * u;
     const rowH = 30 * u;
-    const items: LegendItem[] = [];
-    let x = content.x;
-    let y = bodyTop;
-    let maxX = content.x;
-    for (const e of legendEntries) {
-      const w = swatch + 8 * u + m.width(e.label, fonts.label) + 28 * u;
-      if (x > content.x && x + w - 28 * u > content.x + content.width) {
-        x = content.x;
-        y += rowH;
+    const place = (x0: number, x1: number, top: number) => {
+      const items: LegendItem[] = [];
+      let x = x0;
+      let y = top;
+      let maxX = x0;
+      for (const e of legendEntries) {
+        const w = swatch + 8 * u + m.width(e.label, fonts.label) + 28 * u;
+        if (x > x0 && x + w - 28 * u > x1) {
+          x = x0;
+          y += rowH;
+        }
+        items.push({ x, y, textX: x + swatch + 8 * u, label: e.label, color: e.color });
+        x += w;
+        maxX = Math.max(maxX, x - 28 * u);
       }
-      items.push({ x, y, textX: x + swatch + 8 * u, label: e.label, color: e.color });
-      x += w;
-      maxX = Math.max(maxX, x - 28 * u);
+      const rect: Rect = { x: x0, y: top, width: Math.max(1, maxX - x0), height: y + rowH - top };
+      return { items, rect };
+    };
+
+    // Beside a top-anchored logo, the legend flows into the space next to it, but only if every row fits
+    // inside the logo's band (so its rect never overlaps the logo). Otherwise it drops below the logo.
+    let placed: { items: LegendItem[]; rect: Rect } | null = null;
+    let besideLogo = false;
+    const candidateTop = textBottom + (textBottom > content.y ? gap * 0.8 : 0);
+    if (logoTop && logoBox && candidateTop < logoBottomY) {
+      const [lx0, lx1] = shrink(true);
+      const beside = place(lx0, lx1, candidateTop);
+      if (beside.rect.y + beside.rect.height <= logoBottomY) {
+        placed = beside;
+        besideLogo = true;
+      }
     }
-    const rect: Rect = { x: content.x, y: bodyTop, width: Math.max(1, maxX - content.x), height: y + rowH - bodyTop };
-    legend = { items, swatch, rect };
-    bodyTop = y + rowH + gap * 0.6;
+    placed ??= place(content.x, content.x + content.width, bodyTop);
+    legend = { items: placed.items, swatch, rect: placed.rect };
+    const legendEnd = placed.rect.y + placed.rect.height + gap * 0.6;
+    bodyTop = besideLogo ? Math.max(legendEnd, logoBottomY + gap * 0.8) : legendEnd;
   }
 
   // --- Plot area ------------------------------------------------------------------------------
@@ -238,6 +276,8 @@ export function computeLayout(doc: ChartDocument, m: TextMeasurer): LayoutResult
     footer,
     legend,
     logoBox,
+    logoImage,
+    logoTreatment: treatment,
     plot,
     regions: { text: textRect, legend: legend?.rect ?? null, footer: footerRect, logo: logoBox },
     domain,

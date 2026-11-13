@@ -9,6 +9,8 @@ export interface DrawOptions {
   scale: number;
   /** Pre-decoded logo bitmaps keyed by data URL. Images without an entry are skipped (never fetched). */
   images?: ReadonlyMap<string, DrawableImage>;
+  /** Font stack for text (defaults to Inter). */
+  fontFamily?: string;
 }
 
 const ALIGN = { start: "left", middle: "center", end: "right" } as const;
@@ -49,7 +51,7 @@ export function drawScene(ctx: Ctx2D, nodes: SceneNode[], opts: DrawOptions): vo
         ctx.stroke();
         break;
       case "text":
-        ctx.font = `${n.fontWeight} ${n.fontSize}px ${FONT_FAMILY}`;
+        ctx.font = `${n.fontWeight} ${n.fontSize}px ${opts.fontFamily ?? FONT_FAMILY}`;
         ctx.fillStyle = n.fill;
         ctx.textAlign = ALIGN[n.anchor];
         ctx.textBaseline = "alphabetic";

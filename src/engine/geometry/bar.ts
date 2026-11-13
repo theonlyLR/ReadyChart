@@ -10,7 +10,8 @@ import type { FrameState } from "../motion/frameState";
 import { FINAL_FRAME, itemAlpha, itemProgress, itemRoll, opacityProp, rollValue } from "../motion/frameState";
 import { flipVertical, roundedRectPath, rotateToLeft, rotateToRight } from "./roundedRect";
 
-const GROUP_GAP = 0.08;
+/** Gap between grouped bars, as a fraction of one bar's thickness. Shared with the drag handles (engine/sculpt.ts). */
+export const GROUP_GAP = 0.08;
 
 const barColor = (doc: ChartDocument, si: number, i: number): string => {
   const s = doc.data.series[si]!;

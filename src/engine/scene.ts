@@ -65,9 +65,14 @@ export function buildSceneFromLayout(doc: ChartDocument, L: LayoutResult, m: Tex
 
   nodes.push(...textBlock(L.footer, theme.muted));
 
-  if (doc.brand.logoDataUrl && L.logoBox) {
-    const b = L.logoBox;
-    nodes.push({ kind: "image", x: b.x, y: b.y, width: b.width, height: b.height, href: doc.brand.logoDataUrl, opacity: doc.brand.opacity });
+  if (L.logoTreatment && L.logoBox && L.logoImage) {
+    const t = L.logoTreatment;
+    if (t.pill) {
+      const r = Math.min(L.logoBox.width, L.logoBox.height) * 0.3;
+      nodes.push({ kind: "path", d: roundedRectPath(L.logoBox.x, L.logoBox.y, L.logoBox.width, L.logoBox.height, [r, r, r, r]), fill: t.pill.fill, opacity: t.pill.opacity });
+    }
+    const b = L.logoImage;
+    nodes.push({ kind: "image", x: b.x, y: b.y, width: b.width, height: b.height, href: t.href, opacity: doc.brand.opacity });
   }
   return nodes;
 }

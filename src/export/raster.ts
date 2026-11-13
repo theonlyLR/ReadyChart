@@ -13,6 +13,7 @@ export interface RasterOptions {
   width: number;
   height: number;
   transparent: boolean;
+  fontFamily?: string;
 }
 
 /** Offscreen raster export. JPG is always opaque; WebP falls back to the WASM encoder where the browser can't. */
@@ -27,7 +28,7 @@ export async function rasterize(nodes: SceneNode[], o: RasterOptions): Promise<B
     ctx.fillStyle = "#FFFFFF";
     ctx.fillRect(0, 0, w, h);
   }
-  drawScene(ctx, nodes, { scale: o.scale, images: await loadImages(nodes) });
+  drawScene(ctx, nodes, { scale: o.scale, images: await loadImages(nodes), fontFamily: o.fontFamily });
 
   const quality = o.quality ?? 0.92;
   const blob = await canvas.convertToBlob({ type: MIME[o.format], quality });

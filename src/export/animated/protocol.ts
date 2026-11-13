@@ -11,6 +11,8 @@ export interface WorkerRequest {
   quality: number;
   /** Abort as soon as the output would exceed this many bytes (used by Fit Under 5 MB). */
   maxBytes?: number;
+  /** CSS family name the buffers below are registered under (the doc's brand font). */
+  fontFamily: string;
   fonts: { weight: number; data: ArrayBuffer }[];
 }
 

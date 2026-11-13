@@ -9,14 +9,16 @@ interface Props {
   /** Extra CSS (e.g. @font-face) injected as a <style> element — used by the SVG exporter. */
   css?: string;
   style?: CSSProperties;
+  /** Font stack for all text (defaults to Inter). */
+  fontFamily?: string;
 }
 
 const translate = (tx?: number, ty?: number) => (tx || ty ? `translate(${tx ?? 0} ${ty ?? 0})` : undefined);
 
 /** Renders the scene model as SVG. Used for the live canvas and (via renderToStaticMarkup) the SVG export. */
-export function SvgScene({ nodes, width, height, css, style }: Props) {
+export function SvgScene({ nodes, width, height, css, style, fontFamily = FONT_FAMILY }: Props) {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${width} ${height}`} width={width} height={height} style={style} fontFamily={FONT_FAMILY}>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${width} ${height}`} width={width} height={height} style={style} fontFamily={fontFamily}>
       {css ? <style>{css}</style> : null}
       {nodes.map((n, i) => {
         switch (n.kind) {

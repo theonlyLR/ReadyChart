@@ -1,5 +1,6 @@
 import type { ChartDocument } from "../model/types";
 import { buildScene } from "../engine/scene";
+import { fontDef } from "../engine/fonts";
 import { getMeasurer } from "../render/measurer";
 import { getEmbeddedFontCss, getFontBuffers } from "./fontEmbed";
 import type { WorkerMessage, WorkerRequest } from "./animated/protocol";
@@ -16,8 +17,8 @@ export interface ExportOptions {
   scale: number;
 }
 
-async function ensureFonts(): Promise<void> {
-  await Promise.all([document.fonts.load("400 16px Inter"), document.fonts.load("600 16px Inter")]);
+async function ensureFonts(family: string): Promise<void> {
+  await Promise.all([document.fonts.load(`400 16px ${family}`), document.fonts.load(`600 16px ${family}`)]);
 }
 
 /**
@@ -25,14 +26,15 @@ async function ensureFonts(): Promise<void> {
  * built from the same buildScene() the live canvas uses.
  */
 export async function renderStatic(doc: ChartDocument, opts: ExportOptions): Promise<Blob> {
-  await ensureFonts();
-  const { nodes } = buildScene(doc, getMeasurer());
+  const font = fontDef(doc.brand.fontFamily);
+  await ensureFonts(font.family);
+  const { nodes } = buildScene(doc, getMeasurer(font.id));
   const { width, height, transparent } = doc.canvas;
   if (opts.format === "svg") {
-    const svg = serializeSvg(nodes, width, height, await getEmbeddedFontCss());
+    const svg = serializeSvg(nodes, width, height, await getEmbeddedFontCss(font.id), font.stack);
     return new Blob([svg], { type: "image/svg+xml" });
   }
-  return rasterize(nodes, { format: opts.format, scale: opts.scale, width, height, transparent });
+  return rasterize(nodes, { format: opts.format, scale: opts.scale, width, height, transparent, fontFamily: font.stack });
 }
 
 export interface AnimatedOptions {
@@ -54,7 +56,8 @@ export type AnimatedResult = { blob: Blob } | { over: number };
  * so the UI thread never holds more than one frame. Aborting terminates the worker.
  */
 export async function renderAnimated(doc: ChartDocument, o: AnimatedOptions): Promise<AnimatedResult> {
-  const fonts = await getFontBuffers();
+  const font = fontDef(doc.brand.fontFamily);
+  const fonts = await getFontBuffers(font.id);
   if (o.signal?.aborted) throw new DOMException("Aborted", "AbortError");
   const worker = new Worker(new URL("./animated/worker.ts", import.meta.url), { type: "module" });
   return new Promise<AnimatedResult>((resolve, reject) => {
@@ -79,7 +82,7 @@ export async function renderAnimated(doc: ChartDocument, o: AnimatedOptions): Pr
       finish();
       reject(new Error(e.message || "Export worker failed"));
     };
-    const req: WorkerRequest = { doc, format: o.format, fps: o.fps, scale: o.scale, quality: o.quality ?? 0.8, maxBytes: o.maxBytes, fonts };
+    const req: WorkerRequest = { doc, format: o.format, fps: o.fps, scale: o.scale, quality: o.quality ?? 0.8, maxBytes: o.maxBytes, fontFamily: font.id, fonts };
     worker.postMessage(req, fonts.map((f) => f.data));
   });
 }

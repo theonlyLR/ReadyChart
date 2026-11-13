@@ -67,7 +67,17 @@ export function createDefaultDocument(): ChartDocument {
       holdEndMs: 1000,
       loopResetMs: 400,
     },
-    brand: { logoDataUrl: null, anchor: "top-right", sizePx: 64, opacity: 1, contrastBackdrop: "none" },
+    brand: {
+      logoDataUrl: null,
+      anchor: "top-right",
+      sizePx: 64,
+      opacity: 1,
+      contrastBackdrop: "none",
+      logoAspect: 1,
+      logoLuminance: 0.5,
+      logoInvertedDataUrl: null,
+      fontFamily: "inter",
+    },
   };
 }
 

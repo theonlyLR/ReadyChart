@@ -4,6 +4,8 @@ import { parseCellNumber } from "../../model/dataOps";
 import { buildTimeline } from "../../engine/motion/timeline";
 import { useDocumentStore } from "../../store/documentStore";
 import { CommitInput } from "../CommitInput";
+import { BrandSection } from "./BrandSection";
+import { BrandKitVault } from "./BrandKitVault";
 import { ColorField, Section, SelectField, SliderField, TextField, ToggleField } from "./fields";
 
 const ASPECTS: { value: AspectPreset; label: string }[] = [
@@ -144,6 +146,9 @@ export function Inspector() {
           <SliderField key={side} label={`Padding ${side.toLowerCase()}`} value={canvas.padding[i]!} min={0} max={240} format={px} onChange={(v) => set((d) => void (d.canvas.padding[i] = v))} />
         ))}
       </Section>
+
+      <BrandSection />
+      <BrandKitVault />
 
       <Section title="Number format">
         <TextField label="Locale" value={data.locale} onCommit={(v) => set((d) => void (d.data.locale = v.trim() || "en-US"))} />

@@ -4,6 +4,7 @@ import { buildTimeline } from "../engine/motion/timeline";
 import { computeLayout } from "../engine/layout";
 import { buildSceneFromLayout } from "../engine/scene";
 import type { TextMeasurer } from "../engine/textMeasure";
+import { fontStack } from "../engine/fonts";
 import { drawScene, loadImages } from "../render/canvasRenderer";
 import type { DrawableImage } from "../render/canvasRenderer";
 
@@ -53,7 +54,7 @@ export async function createFrameRenderer(doc: ChartDocument, scale: number, mea
     settledMs: tl.heroEndMs,
     render(tMs) {
       ctx.clearRect(0, 0, w, h);
-      drawScene(ctx, buildSceneFromLayout(doc, layout, measurer, computeFrameState(doc, tMs)), { scale, images });
+      drawScene(ctx, buildSceneFromLayout(doc, layout, measurer, computeFrameState(doc, tMs)), { scale, images, fontFamily: fontStack(doc.brand.fontFamily) });
       return ctx.getImageData(0, 0, w, h);
     },
   };

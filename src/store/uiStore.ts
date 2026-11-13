@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { TextField } from "../engine/textTargets";
 import type { ExportFormat } from "../export/pipeline";
 import type { Platform } from "../components/FlightCheck/safeZones";
 
@@ -10,6 +11,11 @@ interface UiState {
   setFlightCheckOpen: (open: boolean) => void;
   /** Flips true once Inter is loaded, so layout re-measures with real glyph widths. */
   fontsReady: boolean;
+  /** Bumped whenever another brand font finishes loading, so layout re-measures. */
+  fontsVersion: number;
+  /** Canvas text field currently being edited inline (ephemeral UI; the text itself lives in the document). */
+  editingField: TextField | null;
+  setEditingField: (f: TextField | null) => void;
   /** Flight Check export settings. */
   exportFormat: ExportFormat;
   exportScale: number;
@@ -30,6 +36,9 @@ export const useUiStore = create<UiState>((set) => ({
   flightCheckOpen: false,
   setFlightCheckOpen: (flightCheckOpen) => set({ flightCheckOpen }),
   fontsReady: false,
+  fontsVersion: 0,
+  editingField: null,
+  setEditingField: (editingField) => set({ editingField }),
   exportFormat: "png",
   exportScale: 2,
   exportFps: 30,
