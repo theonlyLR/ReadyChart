@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local export test downloads
+*.webp
+!public/**/*.webp
+!src/**/*.webp
