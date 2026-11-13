@@ -1,6 +1,7 @@
 import type { CellProvenance, ChartDocument, ChartType, DataSeries } from "../model/types";
-import { SERIES_PALETTE } from "../model/defaults";
+import { ASPECT_PRESETS, SERIES_PALETTE } from "../model/defaults";
 import type { ParsedTable } from "./parseTable";
+import type { ScanResult } from "./image/scanTypes";
 
 export type ImportMode = "replace" | "append";
 
@@ -61,5 +62,36 @@ export function applyParsedTable(doc: ChartDocument, table: ParsedTable, opts: A
     provenance: tagsFor(s, s.values),
   }));
   next.geometry.type = chartForData(opts.chart, table);
+  return next;
+}
+
+/**
+ * Apply a whole screenshot scan (data AND visual design) in one pure step. The caller hands the result to
+ * `replaceDoc`, so Undo reverts every field at once. Brand, motion and fonts are left alone.
+ */
+export function applyScanResult(doc: ChartDocument, scan: ScanResult): ChartDocument {
+  const { chart, table, design } = scan;
+  const next = applyParsedTable(doc, table, { mode: "replace", chart: chart.chartType, provenance: "LOW_CONFIDENCE" });
+  next.title = chart.title;
+  next.subtitle = chart.subtitle;
+  next.sourceFooter = chart.sourceNote;
+
+  const size = ASPECT_PRESETS[design.aspect];
+  next.canvas.aspectPreset = design.aspect;
+  next.canvas.width = size.width;
+  next.canvas.height = size.height;
+  next.canvas.transparent = false;
+  if (design.background) next.canvas.background = design.background;
+  next.canvas.textColor = design.textColor;
+
+  const g = next.geometry;
+  if (design.showXAxis !== null) g.showXAxis = design.showXAxis;
+  if (design.showYAxis !== null) g.showYAxis = design.showYAxis;
+  if (design.showGridlines !== null) g.showGridlines = design.showGridlines;
+  if (design.showDataLabels !== null) g.showDataLabels = design.showDataLabels;
+  if (design.dataLabelPosition !== null) g.dataLabelPosition = design.dataLabelPosition;
+
+  const single = next.data.series.length === 1 && (g.type === "bar" || g.type === "horizontal-bar");
+  if (single && Object.keys(design.barColors).length > 0) next.data.series[0]!.pointColorOverrides = { ...design.barColors };
   return next;
 }

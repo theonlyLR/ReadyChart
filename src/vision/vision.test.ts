@@ -47,7 +47,7 @@ describe("validateExtraction", () => {
 });
 
 describe("extractionToTable provenance", () => {
-  const base = { chartType: "bar" as const, title: "", subtitle: "", labels: ["A", "B"], units: { prefix: "", suffix: "" } };
+  const base = { chartType: "bar" as const, title: "", subtitle: "", sourceNote: "", style: {}, labels: ["A", "B"], units: { prefix: "", suffix: "" } };
   it("printed -> OCR_EXACT; low confidence -> LOW_CONFIDENCE", () => {
     const t = extractionToTable({ ...base, series: [{ name: "P", values: [1, null], valueSource: "printed", confidence: 0.9 }, { name: "Q", values: [1, 2], valueSource: "printed", confidence: 0.3 }] }, []);
     expect(t.series[0]!.provenance).toEqual(["OCR_EXACT", "MISSING"]);
@@ -101,16 +101,16 @@ describe("vision settings storage", () => {
   };
   it("round-trips and clears", () => {
     const s = mem();
-    expect(persistVisionSettings({ apiKey: "sk-1", model: "x" }, s)).toBeNull();
-    expect(loadVisionSettings(s)).toEqual({ apiKey: "sk-1", model: "x" });
-    persistVisionSettings({ apiKey: "", model: "x" }, s);
+    expect(persistVisionSettings({ provider: "anthropic", apiKey: "sk-1", model: "x" }, s)).toBeNull();
+    expect(loadVisionSettings(s)).toEqual({ provider: "anthropic", apiKey: "sk-1", model: "x" });
+    persistVisionSettings({ provider: "anthropic", apiKey: "", model: "x" }, s);
     expect(loadVisionSettings(s).apiKey).toBe("");
   });
   it("survives corrupt data, blocked and full storage", () => {
     expect(parseVisionSettings("{nope").apiKey).toBe("");
-    expect(persistVisionSettings({ apiKey: "k", model: "m" }, null)).toMatch(/unavailable/);
+    expect(persistVisionSettings({ provider: "anthropic", apiKey: "k", model: "m" }, null)).toMatch(/unavailable/);
     const full = { ...mem(), setItem: () => { throw new Error("quota"); } };
-    expect(persistVisionSettings({ apiKey: "k", model: "m" }, full)).toMatch(/Couldn't save/);
+    expect(persistVisionSettings({ provider: "anthropic", apiKey: "k", model: "m" }, full)).toMatch(/Couldn't save/);
     const boom = { getItem: () => { throw new Error("blocked"); }, setItem: () => {}, removeItem: () => {} };
     expect(loadVisionSettings(boom).apiKey).toBe("");
   });

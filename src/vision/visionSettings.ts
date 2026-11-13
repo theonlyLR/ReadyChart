@@ -3,7 +3,12 @@ import { DEFAULT_VISION_MODEL } from "./anthropicProvider";
 
 export const VISION_STORAGE_KEY = "readychart.vision.v1";
 
+export type VisionProviderId = "anthropic" | "gemini" | "openai";
+const PROVIDER_IDS: readonly VisionProviderId[] = ["anthropic", "gemini", "openai"];
+
 export interface VisionSettings {
+  /** Which provider the key belongs to (sent as x-provider to the dev proxy). */
+  provider: VisionProviderId;
   apiKey: string;
   model: string;
 }
@@ -19,11 +24,12 @@ function defaultStorage(): Store | null {
 }
 
 export function parseVisionSettings(raw: string | null): VisionSettings {
-  const empty: VisionSettings = { apiKey: "", model: DEFAULT_VISION_MODEL };
+  const empty: VisionSettings = { provider: "anthropic", apiKey: "", model: DEFAULT_VISION_MODEL };
   if (!raw) return empty;
   try {
     const o = JSON.parse(raw) as Partial<VisionSettings> | null;
     return {
+      provider: PROVIDER_IDS.find((p) => p === o?.provider) ?? "anthropic",
       apiKey: typeof o?.apiKey === "string" ? o.apiKey.trim() : "",
       model: typeof o?.model === "string" && o.model.trim() ? o.model.trim() : DEFAULT_VISION_MODEL,
     };
@@ -66,7 +72,7 @@ export const useVisionStore = create<VisionState>((set, get) => ({
   ...loadVisionSettings(),
   error: null,
   set: (patch) => {
-    const next = { apiKey: get().apiKey, model: get().model, ...patch };
+    const next = { provider: get().provider, apiKey: get().apiKey, model: get().model, ...patch };
     set({ ...next, error: persistVisionSettings(next) });
   },
   clearKey: () => get().set({ apiKey: "" }),

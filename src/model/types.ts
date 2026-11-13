@@ -1,6 +1,7 @@
 export type ChartType = "bar" | "horizontal-bar" | "stacked-bar" | "line" | "area" | "pie" | "donut";
 export type CellProvenance = "USER_INPUT" | "PARSED" | "OCR_EXACT" | "AXIS_MEASURED" | "LOW_CONFIDENCE" | "MISSING";
 export type AspectPreset = "16:9" | "4:5" | "9:16" | "1:1" | "custom";
+export type DataLabelPosition = "outside-top" | "inside-top" | "inside-bottom";
 export type ContrastBackdrop = "none" | "frosted-pill" | "auto-invert";
 export type FontFamilyId = "inter" | "lora" | "space-grotesk" | "custom";
 export type CustomFontFormat = "woff2" | "woff" | "ttf" | "otf";
@@ -33,6 +34,8 @@ export interface ChartDocument {
     aspectPreset: AspectPreset;
     background: string;
     transparent: boolean;
+    /** Chart text colour. null = automatic (dark or light ink chosen from the background). */
+    textColor: string | null;
     padding: Corners;
   };
   data: {
@@ -56,6 +59,12 @@ export interface ChartDocument {
     showGridlines: boolean;
     gridlineOpacity: number;
     showDataLabels: boolean;
+    /** Category axis labels (x axis on vertical charts, the left-hand labels on horizontal bars). */
+    showXAxis: boolean;
+    /** Value axis tick labels. */
+    showYAxis: boolean;
+    /** Where bar value labels sit: past the bar end, or inside it at the end / at the base. */
+    dataLabelPosition: DataLabelPosition;
     groupSmallSlicesBelowPct: number;
   };
   motion: {

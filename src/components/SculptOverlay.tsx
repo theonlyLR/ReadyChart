@@ -5,7 +5,7 @@ import type { LayoutResult } from "../engine/layout";
 import { computeHandles, valueFromPointer } from "../engine/sculpt";
 import type { Handle } from "../engine/sculpt";
 import { formatValue } from "../engine/format";
-import { setCell } from "../model/dataOps";
+import { confirmCell, isUnverified, setCell } from "../model/dataOps";
 import { useDocumentStore } from "../store/documentStore";
 import { useUiStore } from "../store/uiStore";
 
@@ -82,8 +82,13 @@ export function SculptOverlay({ doc, layout }: { doc: ChartDocument; layout: Lay
     if (!d || e.pointerId !== d.pointerId) return;
     drag.current = null;
     setActiveKey(null);
-    if (!d.started) return;
     const store = useDocumentStore.getState();
+    if (!d.started) {
+      // A plain click on a flagged (unverified) value confirms it, which clears its amber ring. No-op otherwise.
+      const p = store.doc.data.series[d.handle.seriesIndex]?.provenance[d.handle.index];
+      if (isUnverified(p)) store.update((s) => confirmCell(s.data, d.handle.seriesIndex, d.handle.index));
+      return;
+    }
     store.update((s) => {
       s.geometry.yMin = d.orig.yMin;
       s.geometry.yMax = d.orig.yMax;

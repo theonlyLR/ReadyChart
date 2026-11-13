@@ -5,17 +5,54 @@ import type { Platform } from "../components/FlightCheck/safeZones";
 
 export type Backdrop = "checker" | "dark" | "white";
 
+/** Screenshot scan overlay. Pure UI state: the chart document is only touched when a scan succeeds. */
+export interface ScanUi {
+  /** "docking" = the result is applied and the card is flying into the Compare pill. */
+  status: "idle" | "scanning" | "error" | "docking";
+  /** Real milestone reached (0 detecting, 1 sampling, 2 reconstructing). The pill may run ahead of 0 -> 1 on a timer. */
+  stage: 0 | 1 | 2;
+  image: Blob | null;
+  error: string | null;
+  /** Error was a missing API key: offer the inline key prompt. */
+  needsKey: boolean;
+  /** Bundled sample: canned extraction, no network. */
+  demo: boolean;
+}
+
+export interface CompareUi {
+  /** Cropped original screenshot. */
+  blob: Blob | null;
+  /** Controls folded away (the overlay itself stays). */
+  collapsed: boolean;
+  /** 0..100 */
+  opacity: number;
+}
+
+export interface Toast {
+  id: number;
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  tone?: "info" | "error";
+}
+
 /** Ephemeral UI chrome only. Never chart data, styling or animation state (that lives in ChartDocument). */
 interface UiState {
   flightCheckOpen: boolean;
   setFlightCheckOpen: (open: boolean) => void;
-  /** Import Data modal (ephemeral chrome). `importTab` picks the tab it opens on. */
-  importOpen: boolean;
-  importTab: "text" | "screenshot";
-  /** Text or image waiting to be loaded into the Import modal (from ⌘V or drag/drop). Throwaway input, never chart state. */
-  importSeed: { text?: string; image?: Blob } | null;
-  openImport: (tab: "text" | "screenshot", seed?: { text?: string; image?: Blob }) => void;
-  closeImport: () => void;
+  /** A file is being dragged over the window. */
+  dropActive: boolean;
+  setDropActive: (active: boolean) => void;
+  scan: ScanUi;
+  setScan: (patch: Partial<ScanUi>) => void;
+  compare: CompareUi;
+  setCompare: (patch: Partial<CompareUi>) => void;
+  /** True while the one-shot entrance playback after a scan is running. */
+  reveal: boolean;
+  setReveal: (reveal: boolean) => void;
+  toast: Toast | null;
+  showToast: (t: Omit<Toast, "id">) => void;
+  dismissToast: () => void;
   /** Flips true once Inter is loaded, so layout re-measures with real glyph widths. */
   fontsReady: boolean;
   /** Bumped whenever another brand font finishes loading, so layout re-measures. */
@@ -39,14 +76,25 @@ interface UiState {
   setExport: (patch: Partial<Pick<UiState, "exportFormat" | "exportScale" | "exportFps" | "backdrop" | "safeZone">>) => void;
 }
 
+export const IDLE_SCAN: ScanUi = { status: "idle", stage: 0, image: null, error: null, needsKey: false, demo: false };
+export const NO_COMPARE: CompareUi = { blob: null, collapsed: false, opacity: 45 };
+
+let toastId = 0;
+
 export const useUiStore = create<UiState>((set) => ({
   flightCheckOpen: false,
   setFlightCheckOpen: (flightCheckOpen) => set({ flightCheckOpen }),
-  importOpen: false,
-  importTab: "text",
-  importSeed: null,
-  openImport: (importTab, seed) => set({ importOpen: true, importTab, importSeed: seed ?? null }),
-  closeImport: () => set({ importOpen: false, importSeed: null }),
+  dropActive: false,
+  setDropActive: (dropActive) => set({ dropActive }),
+  scan: IDLE_SCAN,
+  setScan: (patch) => set((s) => ({ scan: { ...s.scan, ...patch } })),
+  compare: NO_COMPARE,
+  setCompare: (patch) => set((s) => ({ compare: { ...s.compare, ...patch } })),
+  reveal: false,
+  setReveal: (reveal) => set({ reveal }),
+  toast: null,
+  showToast: (t) => set({ toast: { ...t, id: ++toastId } }),
+  dismissToast: () => set({ toast: null }),
   fontsReady: false,
   fontsVersion: 0,
   editingField: null,

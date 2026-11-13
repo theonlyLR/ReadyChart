@@ -7,6 +7,10 @@ import { getMeasurer } from "../render/measurer";
 import { fontStack } from "../engine/fonts";
 import { loadFontFamily } from "../render/fontLoader";
 import { SculptOverlay } from "./SculptOverlay";
+import { revealDoc } from "../hooks/usePlayback";
+import { ComparePill, CompareOverlay } from "./Ingest/CompareOriginal";
+import { ConfidenceRings } from "./Ingest/ConfidenceRings";
+import { ScanStage } from "./Ingest/ScanStage";
 import { InlineTextOverlay } from "./InlineTextOverlay";
 import { SvgScene } from "../render/SvgScene";
 import { useDocumentStore } from "../store/documentStore";
@@ -28,13 +32,16 @@ export function StudioCanvas() {
     void loadFontFamily(fontFamily, customFont);
   }, [fontFamily, customFont]);
   const playheadMs = useUiStore((s) => s.playheadMs);
+  const reveal = useUiStore((s) => s.reveal);
 
   // fontsReady is a deliberate dependency: re-measure once Inter is available.
   const scene = useMemo(() => {
+    // After a scan the entrance plays once even if the user has motion off; their own setting is left alone.
+    const motionDoc = reveal ? revealDoc(doc) : doc;
     // Resting playhead = settled frame, so editing always shows the finished chart.
-    const t = playheadMs ?? (doc.motion.enabled ? buildTimeline(doc).heroEndMs : 0);
-    return buildScene(doc, getMeasurer(fontFamily), computeFrameState(doc, t));
-  }, [doc, fontsReady, fontsVersion, playheadMs, fontFamily]);
+    const t = playheadMs ?? (motionDoc.motion.enabled ? buildTimeline(motionDoc).heroEndMs : 0);
+    return buildScene(doc, getMeasurer(fontFamily), computeFrameState(motionDoc, t));
+  }, [doc, fontsReady, fontsVersion, playheadMs, reveal, fontFamily]);
   const guard = pieGuard(doc);
   const { width, height, transparent } = doc.canvas;
 
@@ -51,10 +58,14 @@ export function StudioCanvas() {
           }}
         >
           <SvgScene nodes={scene.nodes} width={width} height={height} fontFamily={fontStack(fontFamily)} style={{ display: "block", width: "100%", height: "100%" }} />
+          <CompareOverlay />
+          <ConfidenceRings doc={doc} layout={scene.layout} />
           <SculptOverlay doc={doc} layout={scene.layout} />
           <InlineTextOverlay doc={doc} layout={scene.layout} />
         </div>
       </div>
+      <ComparePill />
+      <ScanStage />
 
       {guard.blocked && (
         <div className="absolute inset-x-0 top-6 mx-auto flex w-fit max-w-md items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow">

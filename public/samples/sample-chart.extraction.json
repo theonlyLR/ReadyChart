@@ -1,0 +1,94 @@
+{
+  "chartType": "bar",
+  "title": "Monthly active users",
+  "subtitle": "Thousands, 2025",
+  "sourceNote": "Source: Company analytics",
+  "labels": [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun"
+  ],
+  "units": {
+    "prefix": "",
+    "suffix": "K"
+  },
+  "series": [
+    {
+      "name": "Monthly active users",
+      "color": "#6366F1",
+      "values": [
+        48,
+        62,
+        55,
+        71,
+        83,
+        97
+      ],
+      "valueSource": "printed",
+      "confidence": 0.97,
+      "confidences": [
+        0.98,
+        0.98,
+        0.97,
+        0.98,
+        0.98,
+        0.72
+      ]
+    }
+  ],
+  "chartBounds": [
+    163,
+    94,
+    938,
+    906
+  ],
+  "samplePoints": {
+    "background": [
+      109,
+      188
+    ],
+    "series": [
+      [
+        207,
+        739
+      ]
+    ],
+    "bars": [
+      [
+        207,
+        739
+      ],
+      [
+        324,
+        721
+      ],
+      [
+        441,
+        730
+      ],
+      [
+        559,
+        709
+      ],
+      [
+        676,
+        694
+      ],
+      [
+        793,
+        676
+      ]
+    ]
+  },
+  "style": {
+    "showXAxis": true,
+    "showYAxis": false,
+    "showGridlines": false,
+    "showDataLabels": true,
+    "dataLabelPosition": "inside-top",
+    "textColor": "#FFFFFF"
+  }
+}

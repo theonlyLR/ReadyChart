@@ -28,7 +28,7 @@ function textBlock(b: TextBlock, fill: string): SceneNode[] {
 
 /** doc + layout -> flat, ordered scene. Pure; the only thing renderers consume. */
 export function buildSceneFromLayout(doc: ChartDocument, L: LayoutResult, m: TextMeasurer, frame: FrameState = FINAL_FRAME): SceneNode[] {
-  const theme = themeFor(doc.canvas.background, doc.canvas.transparent);
+  const theme = themeFor(doc.canvas.background, doc.canvas.transparent, doc.canvas.textColor);
   const nodes: SceneNode[] = [];
 
   if (!doc.canvas.transparent) {

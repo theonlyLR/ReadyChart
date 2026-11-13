@@ -233,11 +233,11 @@ export function computeLayout(doc: ChartDocument, m: TextMeasurer): LayoutResult
   if (orientation === "radial") {
     plot = { x: content.x, y: bodyTop, width: content.width, height: availH };
   } else if (orientation === "vertical") {
-    const tickW = ticks.reduce((mx, t) => Math.max(mx, m.width(formatValue(doc.data, t), fonts.label)), 0);
-    yAxisWidth = tickW + 16 * u;
+    const tickW = doc.geometry.showYAxis ? ticks.reduce((mx, t) => Math.max(mx, m.width(formatValue(doc.data, t), fonts.label)), 0) : 0;
+    yAxisWidth = doc.geometry.showYAxis ? tickW + 16 * u : 0;
     let plotX = content.x + yAxisWidth;
     let plotW = content.x + content.width - plotX;
-    categoryLabels = solveXLabels(doc.data.labels, plotW / n, m, fonts.label);
+    if (doc.geometry.showXAxis) categoryLabels = solveXLabels(doc.data.labels, plotW / n, m, fonts.label);
     if (categoryLabels.rotation === -45) {
       // The first tilted label extends left of its tick; widen the left inset instead of clipping.
       const overflow = categoryLabels.maxWidth * SIN45 - (yAxisWidth + plotW / n / 2);
@@ -247,17 +247,17 @@ export function computeLayout(doc: ChartDocument, m: TextMeasurer): LayoutResult
         categoryLabels = solveXLabels(doc.data.labels, plotW / n, m, fonts.label);
       }
     }
-    const axisH = categoryLabels.height + 14 * u;
+    const axisH = doc.geometry.showXAxis ? categoryLabels.height + 14 * u : 0;
     const topPad = labelPad;
     const botPad = negLabels ? labelPad : 0;
     plot = { x: plotX, y: bodyTop + topPad, width: Math.max(1, plotW), height: Math.max(20, availH - axisH - topPad - botPad) };
   } else {
-    const catW = doc.data.labels.reduce((mx, l) => Math.max(mx, m.width(l, fonts.label)), 0);
-    yAxisWidth = Math.min(catW, content.width * 0.35) + 16 * u;
+    const catW = doc.geometry.showXAxis ? doc.data.labels.reduce((mx, l) => Math.max(mx, m.width(l, fonts.label)), 0) : 0;
+    yAxisWidth = doc.geometry.showXAxis ? Math.min(catW, content.width * 0.35) + 16 * u : 0;
     const valueLabelW = doc.geometry.showDataLabels
       ? ticks.reduce((mx, t) => Math.max(mx, m.width(formatValue(doc.data, t), fonts.value)), 0) + 14 * u
       : 0;
-    const axisH = lh(fonts.label) + 14 * u;
+    const axisH = doc.geometry.showYAxis ? lh(fonts.label) + 14 * u : 0;
     const plotX = content.x + yAxisWidth + (negLabels ? valueLabelW : 0);
     const plotW = content.x + content.width - valueLabelW - plotX;
     const plotH = Math.max(20, availH - axisH);

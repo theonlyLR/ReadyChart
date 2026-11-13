@@ -2,6 +2,7 @@ import type { ChartDocument } from "../../model/types";
 import { clamp } from "../../model/validate";
 import type { SceneNode } from "../types";
 import type { Theme } from "../theme";
+import { inkOn } from "../theme";
 import type { TextMeasurer } from "../textMeasure";
 import type { LayoutResult } from "../layout";
 import { formatValue } from "../format";
@@ -89,7 +90,22 @@ export function verticalBarNodes(doc: ChartDocument, L: LayoutResult, theme: The
       nodes.push({ kind: "path", d: roundedRectPath(x, top, barW, h, v >= 0 ? g.barRadius : flipVertical(g.barRadius)), fill: barColor(doc, si, i), ...opacityProp(frame.fade) });
       if (g.showDataLabels) {
         const text = formatValue(doc.data, v);
-        if (m.width(text, fonts.value, 600) <= barW + gapIn + catGap * 0.9) {
+        const tw = m.width(text, fonts.value, 600);
+        if (g.dataLabelPosition !== "outside-top" && h >= fonts.value * 1.6 && tw <= barW - 8 * u) {
+          // Inside the bar: "top" = the end away from zero, "bottom" = the end at the baseline.
+          const atTop = (g.dataLabelPosition === "inside-top") === (v >= 0);
+          nodes.push({
+            kind: "text",
+            x: x + barW / 2,
+            y: atTop ? top + 8 * u + fonts.value * 0.75 : top + h - 8 * u,
+            text: formatValue(doc.data, rollValue(v, roll)),
+            fontSize: fonts.value,
+            fontWeight: 600,
+            fill: inkOn(barColor(doc, si, i)),
+            anchor: "middle",
+            ...opacityProp(alpha),
+          });
+        } else if (tw <= barW + gapIn + catGap * 0.9) {
           nodes.push({
             kind: "text",
             x: x + barW / 2,
@@ -137,7 +153,23 @@ export function horizontalBarNodes(doc: ChartDocument, L: LayoutResult, theme: T
       const w = Math.abs(xv - base);
       if (w <= 0) return;
       nodes.push({ kind: "path", d: roundedRectPath(left, yy, w, barH, v >= 0 ? rotateToRight(g.barRadius) : rotateToLeft(g.barRadius)), fill: barColor(doc, si, i), ...opacityProp(frame.fade) });
-      if (g.showDataLabels && barH >= fonts.value * 0.8) {
+      const tw = g.showDataLabels ? m.width(formatValue(doc.data, v), fonts.value, 600) : 0;
+      if (g.showDataLabels && g.dataLabelPosition !== "outside-top" && barH >= fonts.value * 0.8 && w >= tw + 16 * u) {
+        // Inside: "top" = the end away from zero, "bottom" = the end at the baseline.
+        const atEnd = g.dataLabelPosition === "inside-top";
+        const right = atEnd === (v >= 0);
+        nodes.push({
+          kind: "text",
+          x: right ? left + w - 8 * u : left + 8 * u,
+          y: yy + barH / 2 + fonts.value * 0.35,
+          text: formatValue(doc.data, rollValue(v, roll)),
+          fontSize: fonts.value,
+          fontWeight: 600,
+          fill: inkOn(barColor(doc, si, i)),
+          anchor: right ? "end" : "start",
+          ...opacityProp(alpha),
+        });
+      } else if (g.showDataLabels && barH >= fonts.value * 0.8) {
         nodes.push({
           kind: "text",
           x: v >= 0 ? left + w + 8 * u : left - 8 * u,
@@ -152,6 +184,5 @@ export function horizontalBarNodes(doc: ChartDocument, L: LayoutResult, theme: T
       }
     });
   }
-  void m;
   return nodes;
 }

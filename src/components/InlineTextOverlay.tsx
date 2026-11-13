@@ -22,8 +22,8 @@ interface EditorProps {
  * Esc reverts. It is opaque and exactly covers the drawn text so the SVG underneath is hidden while editing.
  */
 function Editor({ value, target, doc, onDone }: EditorProps) {
-  const { width: W, height: H, background, transparent } = doc.canvas;
-  const theme = themeFor(background, transparent);
+  const { width: W, height: H, background, transparent, textColor } = doc.canvas;
+  const theme = themeFor(background, transparent, textColor);
   const [draft, setDraft] = useState(value);
   const cancelled = useRef(false);
   const finished = useRef(false);

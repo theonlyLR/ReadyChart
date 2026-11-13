@@ -20,6 +20,7 @@ export function createDefaultDocument(): ChartDocument {
       aspectPreset: "16:9",
       background: "#FFFFFF",
       transparent: false,
+      textColor: null,
       padding: [72, 96, 72, 96],
     },
     data: {
@@ -51,6 +52,9 @@ export function createDefaultDocument(): ChartDocument {
       showGridlines: true,
       gridlineOpacity: 0.12,
       showDataLabels: true,
+      showXAxis: true,
+      showYAxis: true,
+      dataLabelPosition: "outside-top",
       groupSmallSlicesBelowPct: 3,
     },
     motion: {

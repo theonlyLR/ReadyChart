@@ -32,9 +32,32 @@ export function rgbLuminance(r8: number, g8: number, b8: number): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-export function themeFor(background: string, transparent: boolean): Theme {
+/** Blend `a` toward `b` by t (0 = a, 1 = b). Returns `a` unchanged when either is not a hex colour. */
+export function mixHex(a: string, b: string, t: number): string {
+  const x = parseHex(a);
+  const y = parseHex(b);
+  if (!x || !y) return a;
+  const c = [0, 1, 2].map((i) => Math.round(x[i]! + (y[i]! - x[i]!) * t).toString(16).padStart(2, "0"));
+  return `#${c.join("")}`.toUpperCase();
+}
+
+/** Readable text colour for a label drawn on top of `fill`. */
+export function inkOn(fill: string): string {
+  return luminance(fill) > 0.42 ? "#0F172A" : "#FFFFFF";
+}
+
+export function isHexColor(c: string): boolean {
+  return parseHex(c) !== null;
+}
+
+export function themeFor(background: string, transparent: boolean, textColor: string | null = null): Theme {
   const dark = !transparent && luminance(background) < 0.25;
-  return dark
+  const base: Theme = dark
     ? { ink: "#F8FAFC", muted: "#94A3B8", onAccent: "#FFFFFF", surface: background, dark }
     : { ink: "#0F172A", muted: "#64748B", onAccent: "#FFFFFF", surface: transparent ? "#FFFFFF" : background, dark };
+  if (textColor && isHexColor(textColor)) {
+    // Custom ink; secondary text is the same colour faded toward the page.
+    return { ...base, ink: textColor, muted: mixHex(textColor, transparent ? (dark ? "#0F172A" : "#FFFFFF") : background, 0.38) };
+  }
+  return base;
 }

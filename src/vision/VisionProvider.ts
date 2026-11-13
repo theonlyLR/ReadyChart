@@ -1,4 +1,4 @@
-import type { CellProvenance, ChartType } from "../model/types";
+import type { CellProvenance, ChartType, DataLabelPosition } from "../model/types";
 import type { ParsedSeries, ParsedTable } from "../ingest/parseTable";
 import type { SampledColor } from "../ingest/image/sampleColors";
 import { valuesFromPixels } from "./pixelMath";
@@ -11,10 +11,39 @@ import type { AxisCalibration } from "./pixelMath";
  */
 export interface VisionProvider {
   readonly name: string;
-  extractChart(image: Blob, hints: { width: number; height: number; colors: string[] }): Promise<unknown>;
+  extractChart(image: Blob, hints: { width: number; height: number; colors: string[] }, signal?: AbortSignal): Promise<unknown>;
 }
 
 export type ValueSource = "printed" | "estimated";
+
+/** Values below this confidence are tagged LOW_CONFIDENCE and highlighted on the canvas until the user checks them. */
+export const CONFIDENCE_THRESHOLD = 0.85;
+
+/** [ymin, xmin, ymax, xmax], each 0..1000 of the full image. */
+export type NormBounds = [number, number, number, number];
+/** [x, y], each 0..1000 of the full image. */
+export type NormPoint = [number, number];
+
+/** Placeholder for a sample point the model got wrong; keeps array indexes aligned. */
+export const NO_POINT: NormPoint = [-1, -1];
+
+export interface SamplePoints {
+  background?: NormPoint;
+  /** One point on each series' fill/stroke (legend swatch or mark), in series order. */
+  series: NormPoint[];
+  /** One point inside each bar (single-series bar charts), in label order. */
+  bars: NormPoint[];
+}
+
+export interface ExtractedStyle {
+  showXAxis?: boolean;
+  showYAxis?: boolean;
+  showGridlines?: boolean;
+  showDataLabels?: boolean;
+  dataLabelPosition?: DataLabelPosition;
+  /** Hex of the main text colour, when the model could read it. */
+  textColor?: string;
+}
 
 export interface ExtractedSeries {
   name: string;
@@ -23,6 +52,8 @@ export interface ExtractedSeries {
   valueSource: ValueSource;
   /** 0..1 */
   confidence: number;
+  /** Optional per-value confidence (same length as labels); overrides `confidence` where present. */
+  confidences?: (number | null)[];
   colorHint?: string;
   /** y pixel of each bar top / point, in the coordinate frame of the image that was sent. Enables pixel math. */
   topsPx?: (number | null)[];
@@ -32,17 +63,45 @@ export interface ExtractedChart {
   chartType: ChartType;
   title: string;
   subtitle: string;
+  /** Footnote / "Source: ..." line. */
+  sourceNote: string;
   labels: string[];
   series: ExtractedSeries[];
   units: { prefix: string; suffix: string };
   axis?: AxisCalibration;
+  /** Chart area alone, without browser tabs, toolbars or page chrome. */
+  chartBounds?: NormBounds;
+  samplePoints?: SamplePoints;
+  style: ExtractedStyle;
 }
 
 const CHART_TYPES: readonly ChartType[] = ["bar", "horizontal-bar", "stacked-bar", "line", "area", "pie", "donut"];
-const LOW_CONFIDENCE = 0.6;
+const LABEL_POSITIONS: readonly DataLabelPosition[] = ["outside-top", "inside-top", "inside-bottom"];
+/** A crop narrower than this (of 1000) is assumed to be a model mistake. */
+const MIN_BOUNDS_SPAN = 100;
 
 const str = (v: unknown, max = 200): string => (typeof v === "string" ? v.trim().slice(0, max) : "");
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+const bool = (v: unknown): boolean | undefined => (typeof v === "boolean" ? v : undefined);
+const hex = (v: unknown): string | undefined => (/^#[0-9a-f]{6}$/i.test(str(v)) ? str(v).toUpperCase() : undefined);
+const norm = (n: number): number => Math.min(1000, Math.max(0, n));
+
+function point(v: unknown): NormPoint | null {
+  if (!Array.isArray(v) || v.length < 2) return null;
+  const x = num(v[0]);
+  const y = num(v[1]);
+  return x === null || y === null ? null : [norm(x), norm(y)];
+}
+
+/** [ymin,xmin,ymax,xmax] -> clamped, ordered box; null when missing, malformed or implausibly small. */
+export function parseBounds(v: unknown): NormBounds | null {
+  if (!Array.isArray(v) || v.length < 4) return null;
+  const n = v.slice(0, 4).map(num);
+  if (n.some((x) => x === null)) return null;
+  const [a, b, c, d] = n.map((x) => norm(x!)) as [number, number, number, number];
+  const box: NormBounds = [Math.min(a, c), Math.min(b, d), Math.max(a, c), Math.max(b, d)];
+  return box[2] - box[0] < MIN_BOUNDS_SPAN || box[3] - box[1] < MIN_BOUNDS_SPAN ? null : box;
+}
 
 /** Hand-written schema check for the model's JSON. Never throws; problems become warnings. */
 export function validateExtraction(raw: unknown): { chart: ExtractedChart | null; warnings: string[] } {
@@ -71,7 +130,8 @@ export function validateExtraction(raw: unknown): { chart: ExtractedChart | null
       values: fit(o.values, num),
       valueSource: o.valueSource === "printed" ? "printed" : "estimated",
       confidence: Math.min(1, Math.max(0, num(o.confidence) ?? 0.5)),
-      colorHint: /^#[0-9a-f]{6}$/i.test(str(o.color)) ? str(o.color).toUpperCase() : undefined,
+      confidences: Array.isArray(o.confidences) ? fit(o.confidences, (x) => (num(x) === null ? null : Math.min(1, Math.max(0, num(x)!)))) : undefined,
+      colorHint: hex(o.color),
       topsPx: Array.isArray(o.topsPx) ? fit(o.topsPx, num) : undefined,
     });
   }
@@ -83,25 +143,47 @@ export function validateExtraction(raw: unknown): { chart: ExtractedChart | null
       ? { baselinePx: num(a.baselinePx)!, baselineValue: num(a.baselineValue) ?? 0, topTickPx: num(a.topTickPx)!, topTickValue: num(a.topTickValue)! }
       : undefined;
 
+  const chartBounds = parseBounds(r.chartBounds) ?? undefined;
+  if (r.chartBounds !== undefined && !chartBounds) warnings.push("The chart's crop box looked wrong, so the whole image was used.");
+
+  const sp = r.samplePoints && typeof r.samplePoints === "object" ? (r.samplePoints as Record<string, unknown>) : null;
+  // Unusable entries become NO_POINT so the rest keep their series / bar index.
+  const list = (v: unknown): NormPoint[] => (Array.isArray(v) ? v.map((p) => point(p) ?? NO_POINT) : []);
+  const samplePoints: SamplePoints | undefined = sp ? { background: point(sp.background) ?? undefined, series: list(sp.series), bars: list(sp.bars) } : undefined;
+
+  const st = r.style && typeof r.style === "object" ? (r.style as Record<string, unknown>) : r;
+  const style: ExtractedStyle = {
+    showXAxis: bool(st.showXAxis),
+    showYAxis: bool(st.showYAxis),
+    showGridlines: bool(st.showGridlines),
+    showDataLabels: bool(st.showDataLabels),
+    dataLabelPosition: LABEL_POSITIONS.find((p) => p === st.dataLabelPosition),
+    textColor: hex(st.textColor),
+  };
+
   const u = r.units && typeof r.units === "object" ? (r.units as Record<string, unknown>) : {};
   return {
     chart: {
       chartType: type ?? "bar",
       title: str(r.title),
       subtitle: str(r.subtitle),
+      sourceNote: str(r.sourceNote, 300),
       labels,
       series,
       units: { prefix: str(u.prefix, 3), suffix: str(u.suffix, 3) },
       axis,
+      chartBounds,
+      samplePoints,
+      style,
     },
     warnings,
   };
 }
 
-function nearestColor(hex: string, palette: string[]): string {
+function nearestColor(hexColor: string, palette: string[]): string {
   const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-  const [r, g, b] = rgb(hex) as [number, number, number];
-  let best = hex;
+  const [r, g, b] = rgb(hexColor) as [number, number, number];
+  let best = hexColor;
   let bestD = Infinity;
   for (const p of palette) {
     const [pr, pg, pb] = rgb(p) as [number, number, number];
@@ -112,9 +194,10 @@ function nearestColor(hex: string, palette: string[]): string {
 }
 
 /**
- * Turn a validated extraction into a ParsedTable ready for the shared import preview.
+ * Turn a validated extraction into a ParsedTable.
  * Per-cell provenance: printed -> OCR_EXACT; pixel math from calibrated bar tops -> AXIS_MEASURED;
- * a guess, or confidence below 0.6 -> LOW_CONFIDENCE. Series colours snap to colours actually sampled from the image.
+ * a guess, or confidence below CONFIDENCE_THRESHOLD -> LOW_CONFIDENCE. Series colours snap to colours actually
+ * sampled from the image when no coordinate-sampled colour is available.
  */
 export function extractionToTable(chart: ExtractedChart, sampled: SampledColor[]): ParsedTable {
   const warnings: string[] = [];
@@ -130,10 +213,14 @@ export function extractionToTable(chart: ExtractedChart, sampled: SampledColor[]
         source = "pixel";
       }
     }
-    const low = s.confidence < LOW_CONFIDENCE;
-    const tag: CellProvenance = low || source === "guess" ? "LOW_CONFIDENCE" : source === "pixel" ? "AXIS_MEASURED" : "OCR_EXACT";
-    const color = s.colorHint && palette.length ? nearestColor(s.colorHint, palette) : palette[i];
-    return { name: s.name, values, included: true, color, provenance: values.map((v) => (v === null ? "MISSING" : tag)) };
+    const goodTag: CellProvenance = source === "pixel" ? "AXIS_MEASURED" : "OCR_EXACT";
+    const provenance = values.map((v, k): CellProvenance => {
+      if (v === null) return "MISSING";
+      const conf = s.confidences?.[k] ?? s.confidence;
+      return conf < CONFIDENCE_THRESHOLD || source === "guess" ? "LOW_CONFIDENCE" : goodTag;
+    });
+    const color = s.colorHint && palette.length ? nearestColor(s.colorHint, palette) : (s.colorHint ?? palette[i]);
+    return { name: s.name, values, included: true, color, provenance };
   });
   if (series.some((s) => s.provenance?.includes("LOW_CONFIDENCE"))) warnings.push("Some values are guesses or low-confidence. Compare them with the screenshot before relying on them.");
   return {

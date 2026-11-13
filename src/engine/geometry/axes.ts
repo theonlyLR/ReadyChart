@@ -21,7 +21,7 @@ export function verticalAxes(doc: ChartDocument, L: LayoutResult, theme: Theme, 
       nodes.push({ kind: "line", x1: plot.x, y1: py, x2: plot.x + plot.width, y2: py, stroke: theme.ink, strokeWidth: 1, opacity: doc.geometry.gridlineOpacity * gridAlpha(frame, j, L.ticks.length) });
     });
   }
-  L.ticks.forEach((t, j) => {
+  if (doc.geometry.showYAxis) L.ticks.forEach((t, j) => {
     nodes.push({ kind: "text", x: plot.x - 12 * u, y: y(t) + fonts.label * 0.35, text: formatValue(doc.data, t), fontSize: fonts.label, fontWeight: 400, fill: theme.muted, anchor: "end", ...opacityProp(gridAlpha(frame, j, L.ticks.length)) });
   });
   const [lo, hi] = L.domain;
@@ -39,7 +39,7 @@ export function verticalAxes(doc: ChartDocument, L: LayoutResult, theme: Theme, 
   const step = plot.width / Math.max(1, n);
   const { rotation, step: every } = L.categoryLabels;
   doc.data.labels.forEach((label, i) => {
-    if (i % every !== 0) return;
+    if (!doc.geometry.showXAxis || i % every !== 0) return;
     const cx = plot.x + (i + 0.5) * step;
     if (rotation === 0) {
       nodes.push({ kind: "text", x: cx, y: bottom + 14 * u + fonts.label * 0.8, text: label, fontSize: fonts.label, fontWeight: 400, fill: theme.muted, anchor: "middle", ...opacityProp(frame.grid) });
@@ -64,7 +64,7 @@ export function horizontalAxes(doc: ChartDocument, L: LayoutResult, theme: Theme
       nodes.push({ kind: "line", x1: px, y1: plot.y, x2: px, y2: bottom, stroke: theme.ink, strokeWidth: 1, opacity: doc.geometry.gridlineOpacity * gridAlpha(frame, j, L.ticks.length) });
     });
   }
-  L.ticks.forEach((t, j) => {
+  if (doc.geometry.showYAxis) L.ticks.forEach((t, j) => {
     nodes.push({ kind: "text", x: x(t), y: bottom + 14 * u + fonts.label * 0.8, text: formatValue(doc.data, t), fontSize: fonts.label, fontWeight: 400, fill: theme.muted, anchor: "middle", ...opacityProp(gridAlpha(frame, j, L.ticks.length)) });
   });
   const [lo, hi] = L.domain;
@@ -75,7 +75,7 @@ export function horizontalAxes(doc: ChartDocument, L: LayoutResult, theme: Theme
   const n = doc.data.labels.length;
   const step = plot.height / Math.max(1, n);
   doc.data.labels.forEach((label, i) => {
-    if (i % L.categoryLabels.step !== 0) return;
+    if (!doc.geometry.showXAxis || i % L.categoryLabels.step !== 0) return;
     nodes.push({ kind: "text", x: plot.x - 12 * u, y: plot.y + (i + 0.5) * step + fonts.label * 0.35, text: label, fontSize: fonts.label, fontWeight: 400, fill: theme.muted, anchor: "end", ...opacityProp(frame.grid) });
   });
   return nodes;

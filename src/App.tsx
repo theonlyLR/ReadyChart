@@ -3,7 +3,9 @@ import { Toolbar } from "./components/Toolbar";
 import { DataTable } from "./components/DataTable/DataTable";
 import { Inspector } from "./components/Inspector/Inspector";
 import { FlightCheckModal } from "./components/FlightCheck/FlightCheckModal";
-import { ImportModal } from "./components/Import/ImportModal";
+import { DropOverlay } from "./components/Ingest/DropOverlay";
+import { ToastHost } from "./components/Ingest/Toast";
+import { useGlobalIngest } from "./hooks/useGlobalIngest";
 import { TimelineScrubber } from "./components/Timeline/TimelineScrubber";
 import { usePlayback } from "./hooks/usePlayback";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -11,9 +13,9 @@ import { useUiStore } from "./store/uiStore";
 
 export default function App() {
   useKeyboardShortcuts();
+  useGlobalIngest();
   usePlayback();
   const flightCheckOpen = useUiStore((s) => s.flightCheckOpen);
-  const importOpen = useUiStore((s) => s.importOpen);
 
   return (
     <div className="flex h-screen flex-col bg-slate-100 text-slate-900">
@@ -33,7 +35,8 @@ export default function App() {
         </aside>
       </div>
       {flightCheckOpen && <FlightCheckModal />}
-      {importOpen && <ImportModal />}
+      <DropOverlay />
+      <ToastHost />
     </div>
   );
 }
