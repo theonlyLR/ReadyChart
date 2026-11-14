@@ -26,7 +26,8 @@ Rules:
 - "valueSource" is "printed" when every value in the series is read from a label on the chart, otherwise "estimated".
 - "confidence" is 0..1 per series; "confidences" (optional) is 0..1 per value.
 - Tiny slivers: a bar or slice that is VISIBLE but too small or cramped to read (for example a 1% bar at the end of a percentage series) must never be null. If the other values in the series sum close to 100 (within about 3), estimate the missing value as the remainder (100 minus the others), or from its visible size, and mark it true in the series' "estimated" array (one boolean per value) with a low value in "confidences" (0.5 or less). Do this only for marks you can see; never invent categories.
-- "chartBounds" is the bounding box of the chart area ALONE (title, plot, axes, legend, footnote) with browser/page chrome excluded, as [ymin, xmin, ymax, xmax], each an integer 0..1000 of the full image.
+- "chartBounds" is the bounding box of the chart area ALONE with browser/page chrome excluded, as [ymin, xmin, ymax, xmax], each an integer 0..1000 of the full image. It is only used to crop the comparison overlay, so it may hug the bars and axes tightly.
+- TEXT FROM THE FULL IMAGE: read "title", "subtitle" and "sourceNote" from anywhere in the full screenshot, including text that lies OUTSIDE chartBounds (a heading above the plot, a footnote below it). Never leave them empty just because they fall outside the crop box.
 - "samplePoints" are [x, y] coordinates, each an integer 0..1000 of the FULL image (note x first). Pick spots that are flat colour, away from text and edges:
   "background": one empty spot of the page/chart background;
   "series": one point inside each series' fill or line, in series order;

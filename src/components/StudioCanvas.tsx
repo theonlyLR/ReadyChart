@@ -7,6 +7,7 @@ import { getMeasurer } from "../render/measurer";
 import { fontStack } from "../engine/fonts";
 import { loadFontFamily } from "../render/fontLoader";
 import { SculptOverlay } from "./SculptOverlay";
+import { setChartType } from "../model/dataOps";
 import { revealDoc } from "../hooks/usePlayback";
 import { ComparePill, CompareOverlay } from "./Ingest/CompareOriginal";
 import { ConfidenceRings } from "./Ingest/ConfidenceRings";
@@ -72,7 +73,7 @@ export function StudioCanvas() {
           <span>{guard.reason}</span>
           <button
             className="shrink-0 rounded-md bg-amber-600 px-3 py-1.5 font-medium text-white hover:bg-amber-700"
-            onClick={() => update((d) => void (d.geometry.type = "horizontal-bar"))}
+            onClick={() => update((d) => setChartType(d, "horizontal-bar"))}
           >
             Switch to Horizontal Bar
           </button>

@@ -3,7 +3,7 @@ import { buildPrompt } from "../../vision/prompt";
 import { extractionToTable, validateExtraction } from "../../vision/VisionProvider";
 import type { ExtractedChart, NormBounds } from "../../vision/VisionProvider";
 import { applyMeasuredColors, deriveDesign } from "./design";
-import { boxToCropRect, measureExtent, medianFillColor, verifyGeometry } from "./geometry";
+import { THIN_BAR_PX, boxToCropRect, measureExtent, medianFillColor, sampleRegion, verifyGeometry } from "./geometry";
 
 type RGB = [number, number, number];
 const BG: RGB = [15, 23, 42];
@@ -182,5 +182,32 @@ describe("schema + prompt", () => {
     expect(p).toMatch(/exactly the same number of entries/);
     expect(p).toMatch(/"axisScale"/);
     expect(p).toMatch(/zeroBaselineCoord/);
+  });
+});
+
+describe("thin-sliver colour sampling", () => {
+  it("samples a strip across the end of a bar shorter than 8 px instead of the middle 60%", () => {
+    expect(THIN_BAR_PX).toBe(8);
+    expect(sampleRegion({ x: 10, y: 20, width: 50, height: 2 }, true)).toEqual({ x: 10, y: 20, width: 50, height: 2 });
+    expect(sampleRegion({ x: 10, y: 20, width: 50, height: 7 }, true)).toEqual({ x: 10, y: 20, width: 50, height: 4 });
+    expect(sampleRegion({ x: 10, y: 20, width: 3, height: 40 }, false)).toEqual({ x: 10, y: 20, width: 3, height: 40 });
+    expect(sampleRegion({ x: 10, y: 20, width: 50, height: 100 }, true)).toEqual({ x: 20, y: 40, width: 30, height: 60 });
+  });
+  it("a 2 px sliver gets its own colour (not the series colour)", () => {
+    const image = paint([[40, 70, 90, BASE, BLUE], [310, BASE - 2, 360, BASE, AMBER]]);
+    expect(medianFillColor(image, { x: 310, y: BASE - 2, width: 50, height: 2 }, BG, INK)).toEqual(AMBER);
+    const r = run(chart({ elementBounds: [norm(40, 70, 90, BASE), norm(310, BASE - 2, 360, BASE)], labels: ["A", "B"] }, [50, null]), image);
+    expect(r.colors).toEqual(["#3C5ADC", "#F59E0B"]);
+  });
+  it("horizontal slivers sample a vertical strip at the bar's end", () => {
+    const image = paint([[60, 40, 62, 80, AMBER]]);
+    expect(medianFillColor(image, { x: 60, y: 40, width: 2, height: 40 }, BG, INK, false)).toEqual(AMBER);
+  });
+  it("the first bar's colour becomes the series colour and later differing bars become overrides", () => {
+    const first = chart();
+    const derived = deriveDesign(first, img(), rect, full);
+    const out = applyMeasuredColors(derived, first, ["#F59E0B", "#3C5ADC", "#3C5ADC", "#3C5ADC"]);
+    expect(out.seriesColors).toEqual(["#F59E0B"]);
+    expect(out.design.barColors).toEqual({ 1: "#3C5ADC", 2: "#3C5ADC", 3: "#3C5ADC" });
   });
 });

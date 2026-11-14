@@ -1,6 +1,6 @@
 import { ASPECT_PRESETS } from "../../model/defaults";
 import type { AspectPreset, ChartDocument } from "../../model/types";
-import { clearSliceColors, parseCellNumber, setSliceColor } from "../../model/dataOps";
+import { clearSliceColors, colorEachItem, itemColorsActive, parseCellNumber, setSliceColor } from "../../model/dataOps";
 import { SERIES_PALETTE } from "../../model/defaults";
 import { buildNaturalTimeline, buildTimeline, TOTAL_DURATION_MAX_MS, TOTAL_DURATION_MIN_MS } from "../../engine/motion/timeline";
 import { useDocumentStore } from "../../store/documentStore";
@@ -216,6 +216,21 @@ export function Inspector() {
           >
             Reset slice colors
           </button>
+        </Section>
+      )}
+
+      {(type === "bar" || type === "horizontal-bar") && data.series.length === 1 && (
+        <Section title="Bar colors">
+          <ToggleField label="Color each bar" value={itemColorsActive(data)} onChange={(on) => set((d) => colorEachItem(d.data, on))} />
+          {itemColorsActive(data) &&
+            data.labels.map((label, i) => (
+              <ColorField
+                key={i}
+                label={label || `Bar ${i + 1}`}
+                value={data.series[0]?.pointColorOverrides?.[i] ?? data.series[0]!.color}
+                onChange={(c) => set((d) => setSliceColor(d.data, i, c))}
+              />
+            ))}
         </Section>
       )}
 

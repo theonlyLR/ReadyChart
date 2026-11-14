@@ -47,6 +47,8 @@ export function applyParsedTable(doc: ChartDocument, table: ParsedTable, opts: A
         provenance: tagsFor(s, values),
       });
     }
+    // Now a multi-series dataset: series colours identify the series, so per-item colours on the first one are dropped.
+    delete next.data.series[0]?.pointColorOverrides;
     return next;
   }
 

@@ -134,3 +134,13 @@ describe("tiny sliver recovery", () => {
     expect(t.series[0]!.provenance).toEqual(["OCR_EXACT", "OCR_EXACT", "ESTIMATED"]);
   });
 });
+
+describe("text outside the crop box", () => {
+  it("the prompt tells the model to read title, subtitle and source from the full image", async () => {
+    const { buildPrompt } = await import("./prompt");
+    const p = buildPrompt({ width: 1, height: 1, colors: [] });
+    expect(p).toMatch(/TEXT FROM THE FULL IMAGE/);
+    expect(p).toMatch(/OUTSIDE chartBounds/);
+    expect(p).toMatch(/only used to crop the comparison overlay/);
+  });
+});

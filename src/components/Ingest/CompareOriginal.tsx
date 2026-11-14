@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronUp, Layers, X } from "lucide-react";
 import { useObjectUrl } from "../../hooks/useObjectUrl";
+import { setChartType } from "../../model/dataOps";
 import type { ChartType } from "../../model/types";
 import { useDocumentStore } from "../../store/documentStore";
 import { NO_COMPARE, useUiStore } from "../../store/uiStore";
@@ -23,7 +24,7 @@ function TypeSwitcher() {
           title={q.title}
           aria-pressed={type === q.type}
           className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${type === q.type ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 hover:bg-white"}`}
-          onClick={() => update((d) => void (d.geometry.type = q.type))}
+          onClick={() => update((d) => setChartType(d, q.type))}
         >
           {q.label}
         </button>

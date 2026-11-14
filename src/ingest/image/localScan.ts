@@ -185,13 +185,17 @@ export function buildLocalExtraction(img: PixelBuffer, lines: OcrLine[]): Record
 
   // --- text ---------------------------------------------------------------------------------------
   const minTop = Math.min(...bars.map((b) => b.top));
-  const above = textLines.filter((l) => l.box.bottom <= minTop - 2 && hasLetters(l.text));
+  // Prefer text inside the chart's own area, but a heading / footnote may sit just outside a tight region: fall back to
+  // the whole screenshot rather than dropping it.
+  const aboveIn = (ls: OcrLine[]) => ls.filter((l) => l.box.bottom <= minTop - 2 && hasLetters(l.text));
+  const above = aboveIn(textLines).length > 0 ? aboveIn(textLines) : aboveIn(lines);
   const title = [...above].sort((a, b) => height(b.box) - height(a.box))[0];
   const subtitle = title
     ? above.filter((l) => l !== title && l.box.top >= title.box.bottom - 2 && height(l.box) <= height(title.box) && l.box.top - title.box.bottom <= height(title.box) * 3).sort((a, b) => a.box.top - b.box.top)[0]
     : undefined;
   const belowBars = Math.max(...bars.map((b) => b.bottom));
-  const source = textLines.find((l) => l.box.top >= belowBars && /\b(source|via)\b/i.test(l.text));
+  const isSource = (l: OcrLine) => l.box.top >= belowBars && /\b(source|via)\b/i.test(l.text);
+  const source = textLines.find(isSource) ?? lines.find(isSource);
 
   // --- units --------------------------------------------------------------------------------------
   const unitCells = cells.length ? cells : [];

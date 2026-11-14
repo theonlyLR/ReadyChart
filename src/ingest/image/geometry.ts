@@ -54,13 +54,30 @@ function middle60(r: PixelRect): PixelRect {
   return { x: r.x + mx, y: r.y + my, width: Math.max(1, r.width - 2 * mx), height: Math.max(1, r.height - 2 * my) };
 }
 
+/** A bar shorter than this (px) along its length is a sliver: the middle 60% would be 1-2 px of mostly edge. */
+export const THIN_BAR_PX = 8;
+/** How much of a sliver's end (px) is sampled. */
+const SLIVER_STRIP_PX = 4;
+
 /**
- * Text-safe median fill colour: every pixel in the middle 60% of the box, minus pixels within NOT_FILL_DISTANCE of the
+ * Where to sample a bar's fill. Normal bars: the middle 60% (edges and anti-aliasing excluded). Slivers under 8 px
+ * (a 1% bar): a strip across the bar's whole width, 2-4 px deep at its free end, so the thin bar still yields its own
+ * colour instead of nothing. For vertical bars that is the top of the box, for horizontal bars the right end.
+ */
+export function sampleRegion(box: PixelRect, vertical: boolean): PixelRect {
+  const len = vertical ? box.height : box.width;
+  if (len >= THIN_BAR_PX) return middle60(box);
+  const depth = Math.max(1, Math.min(SLIVER_STRIP_PX, len));
+  return vertical ? { x: box.x, y: box.y, width: box.width, height: depth } : { x: box.x + box.width - depth, y: box.y, width: depth, height: box.height };
+}
+
+/**
+ * Text-safe median fill colour: every pixel in the sample region (middle 60% of the box, or the end strip of a sliver), minus pixels within NOT_FILL_DISTANCE of the
  * background or the text colour (value labels printed inside a bar), then the per-channel median of what's left.
  * Null when nothing is left (the box holds only background / text).
  */
-export function medianFillColor(img: PixelBuffer, box: PixelRect, bg: RGB | null, ink: RGB | null): RGB | null {
-  const m = middle60(box);
+export function medianFillColor(img: PixelBuffer, box: PixelRect, bg: RGB | null, ink: RGB | null, vertical = true): RGB | null {
+  const m = sampleRegion(box, vertical);
   const step = Math.max(1, Math.floor(Math.sqrt((m.width * m.height) / 4000)));
   const rs: number[] = [];
   const gs: number[] = [];
@@ -181,7 +198,7 @@ export function verifyGeometry(o: GeometryOptions): GeometryResult {
       colors.push(null);
       return null;
     }
-    const fill = medianFillColor(crop, r, bg, ink);
+    const fill = medianFillColor(crop, r, bg, ink, vertical);
     colors.push(fill ? rgbToHex(fill) : null);
     const ext = fill ? measureExtent(crop, r, fill, vertical) : null;
     return ext ?? (vertical ? { near: r.y, far: r.y + r.height } : { near: r.x, far: r.x + r.width });

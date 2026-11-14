@@ -1,10 +1,11 @@
 import { Check, Plus, X } from "lucide-react";
 import type { CellProvenance } from "../../model/types";
-import { addRow, addSeries, confirmAll, confirmCell, isUnverified, parseCellNumber, unverifiedCount, removeRow, removeSeries, setCell, setLabel, setSeriesName, setSliceColor } from "../../model/dataOps";
+import { addRow, addSeries, confirmAll, confirmCell, isUnverified, itemColorsActive, parseCellNumber, unverifiedCount, removeRow, removeSeries, setCell, setLabel, setSeriesName, setSliceColor } from "../../model/dataOps";
 import { SERIES_PALETTE } from "../../model/defaults";
 import { useDocumentStore } from "../../store/documentStore";
 import { CommitInput } from "../CommitInput";
 import { ColorField } from "../Inspector/fields";
+import { splitGradient } from "./swatch";
 
 const TINT: Record<CellProvenance, string> = {
   USER_INPUT: "",
@@ -32,7 +33,11 @@ export function DataTable() {
   const data = useDocumentStore((s) => s.doc.data);
   const update = useDocumentStore((s) => s.update);
   const unverified = unverifiedCount(data);
-  const radial =useDocumentStore((s) => s.doc.geometry.type === "pie" || s.doc.geometry.type === "donut");
+  const type = useDocumentStore((s) => s.doc.geometry.type);
+  const radial = type === "pie" || type === "donut";
+  // Single-series bars with their own colours: every row gets a swatch (like pie slices) and the header swatch splits.
+  const perBar = (type === "bar" || type === "horizontal-bar") && itemColorsActive(data);
+  const barColor = (i: number) => data.series[0]?.pointColorOverrides?.[i] ?? data.series[0]?.color ?? SERIES_PALETTE[0]!;
 
   return (
     <section className="p-3">
@@ -59,7 +64,17 @@ export function DataTable() {
             {data.series.map((s, si) => (
               <th key={s.id} className="pb-1 align-bottom">
                 <div className="flex items-center gap-1">
-                  <ColorField ariaLabel={`${s.name} color`} value={s.color} onChange={(c) => update((d) => void (d.data.series[si]!.color = c))} />
+                  {perBar && si === 0 ? (
+                    <span
+                      role="img"
+                      aria-label="Per-bar colors"
+                      title="Each bar has its own color. Edit them on the rows, or turn off Color each bar in the Inspector."
+                      className="inline-block h-6 w-8 shrink-0 rounded border border-slate-200"
+                      style={{ background: splitGradient(data.labels.map((_, i) => barColor(i))) }}
+                    />
+                  ) : (
+                    <ColorField ariaLabel={`${s.name} color`} value={s.color} onChange={(c) => update((d) => void (d.data.series[si]!.color = c))} />
+                  )}
                   <CommitInput
                     ariaLabel={`Series ${si + 1} name`}
                     className={`${cell} font-medium`}
@@ -90,6 +105,7 @@ export function DataTable() {
                       onChange={(c) => update((d) => setSliceColor(d.data, i, c))}
                     />
                   )}
+                  {perBar && <ColorField ariaLabel={`${label} bar color`} value={barColor(i)} onChange={(c) => update((d) => setSliceColor(d.data, i, c))} />}
                   <CommitInput ariaLabel={`Label ${i + 1}`} className={cell} value={label} onCommit={(v) => update((d) => setLabel(d.data, i, v))} />
                 </div>
               </td>

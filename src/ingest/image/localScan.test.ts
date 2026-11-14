@@ -137,3 +137,14 @@ describe("withBudget (OCR never blocks the scan)", () => {
     expect(OCR_BUDGET_MS).toBeLessThanOrEqual(5000);
   });
 });
+
+describe("text outside a tight chart region", () => {
+  it("still reads title, subtitle and source from the whole screenshot", () => {
+    // light page with a dark card holding only the bars; the heading sits on the page above the card, the footnote below
+    const page: RGB = [229, 231, 235];
+    const img = paint(400, 300, page, [[40, 90, 360, 250, BG], ...BARS.map(([x, top], i) => [x, top + 60, x + 40, 240, i === 2 ? AMBER : INDIGO] as [number, number, number, number, RGB])]);
+    const ocr = [line("Revenue by region", box(40, 20, 250, 48)), line("FY2025", box(40, 54, 110, 70)), line("Source: Internal data", box(40, 262, 220, 280))];
+    const raw = buildLocalExtraction(img, ocr)!;
+    expect(raw).toMatchObject({ title: "Revenue by region", subtitle: "FY2025", sourceNote: "Source: Internal data" });
+  });
+});

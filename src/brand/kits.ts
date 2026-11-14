@@ -111,7 +111,7 @@ export function kitFromDoc(doc: ChartDocument, name: string, id: string): BrandK
 
 /**
  * Immer recipe body: applies a kit to a document draft. Touches only /brand, /canvas/background and series
- * *colours* (never labels or values), so applying a kit can't alter the data. Extra series reuse the palette cyclically.
+ * *colours* (including clearing per-item overrides) (never labels or values), so applying a kit can't alter the data. Extra series reuse the palette cyclically.
  */
 export function applyKitToDraft(d: ChartDocument, kit: BrandKit): void {
   d.brand = structuredClone(kit.brand);
@@ -119,6 +119,13 @@ export function applyKitToDraft(d: ChartDocument, kit: BrandKit): void {
   if (kit.palette.length > 0) {
     d.data.series.forEach((s, i) => {
       s.color = kit.palette[i % kit.palette.length]!;
+      // Sampled / hand-picked per-item colours would mask the brand palette, so an explicit kit apply clears them.
+      delete s.pointColorOverrides;
     });
+    // Pie and donut ignore series colours (one colour per slice), so the palette is spread over the slices instead.
+    const first = d.data.series[0];
+    if (first && d.data.series.length === 1 && (d.geometry.type === "pie" || d.geometry.type === "donut")) {
+      first.pointColorOverrides = Object.fromEntries(d.data.labels.map((_, i) => [i, kit.palette[i % kit.palette.length]!]));
+    }
   }
 }

@@ -71,7 +71,7 @@ export function deriveDesign(chart: ExtractedChart, crop: PixelBuffer, rect: Pix
       const c = sample(sp.bars[i]);
       return c && background && colorDistance(c, background) < NEAR_BACKGROUND ? null : c;
     });
-    const base = seriesColors[0] ?? mostCommon(bars.filter((c): c is string => c !== null));
+    const base = bars.find((c): c is string => c !== null) ?? seriesColors[0] ?? null;
     if (base) {
       seriesColors[0] = base;
       bars.forEach((c, i) => {
@@ -113,7 +113,8 @@ export function applyMeasuredColors(derived: DerivedDesign, chart: ExtractedChar
   const valid = colors.filter((c): c is string => c !== null);
   const single = chart.series.length === 1 && (chart.chartType === "bar" || chart.chartType === "horizontal-bar");
   if (!single || valid.length < Math.ceil(colors.length / 2)) return derived;
-  const base = mostCommon(valid);
+  // The series colour is the FIRST bar's, so single-colour views (line, area) default to what the chart starts with.
+  const base = valid[0] ?? mostCommon(valid);
   if (!base) return derived;
   const barColors: Record<number, string> = {};
   colors.forEach((c, i) => {

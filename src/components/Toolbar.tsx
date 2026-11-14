@@ -1,5 +1,6 @@
 import { Download, Redo2, Undo2 } from "lucide-react";
 import { ImportMenu } from "./ImportMenu";
+import { setChartType } from "../model/dataOps";
 import {
   HIGH_DENSITY_COLLISION_FIXTURE,
   MICRO_SLICE_PIE_FIXTURE,
@@ -54,7 +55,7 @@ export function Toolbar() {
         aria-label="Chart type"
         className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm"
         value={type}
-        onChange={(e) => update((d) => void (d.geometry.type = e.target.value as ChartType))}
+        onChange={(e) => update((d) => setChartType(d, e.target.value as ChartType))}
       >
         {CHART_TYPES.map((t) => (
           <option key={t.value} value={t.value}>
