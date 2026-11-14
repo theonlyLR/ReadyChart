@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { TextField } from "../engine/textTargets";
 import type { ExportFormat } from "../export/pipeline";
 import type { Platform } from "../components/FlightCheck/safeZones";
+import { PANEL_DEFAULT, clampLabel, clampPanel, clampSeries } from "../components/DataTable/columns";
 
 export type Backdrop = "checker" | "dark" | "white";
 
@@ -41,6 +42,14 @@ export interface Toast {
 interface UiState {
   flightCheckOpen: boolean;
   setFlightCheckOpen: (open: boolean) => void;
+  /** Data panel layout (pure UI state: never part of the ChartDocument, so Undo/Redo and exports are untouched). */
+  dataPanelWidth: number;
+  /** null = automatic: the Label column takes whatever the numeric columns leave. */
+  labelColWidth: number | null;
+  seriesColWidths: Record<string, number>;
+  setDataPanelWidth: (w: number) => void;
+  setLabelColWidth: (w: number) => void;
+  setSeriesColWidth: (seriesId: string, w: number) => void;
   /** A file is being dragged over the window. */
   dropActive: boolean;
   setDropActive: (active: boolean) => void;
@@ -85,6 +94,12 @@ let toastId = 0;
 export const useUiStore = create<UiState>((set) => ({
   flightCheckOpen: false,
   setFlightCheckOpen: (flightCheckOpen) => set({ flightCheckOpen }),
+  dataPanelWidth: PANEL_DEFAULT,
+  labelColWidth: null,
+  seriesColWidths: {},
+  setDataPanelWidth: (w) => set({ dataPanelWidth: clampPanel(w) }),
+  setLabelColWidth: (w) => set({ labelColWidth: clampLabel(w) }),
+  setSeriesColWidth: (id, w) => set((s) => ({ seriesColWidths: { ...s.seriesColWidths, [id]: clampSeries(w) } })),
   dropActive: false,
   setDropActive: (dropActive) => set({ dropActive }),
   scan: IDLE_SCAN,

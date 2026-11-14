@@ -8,13 +8,15 @@ interface Props {
   ariaLabel?: string;
   inputMode?: "text" | "decimal";
   selectOnFocus?: boolean;
+  /** Native tooltip, so text clipped by a narrow column is readable on hover. */
+  title?: string;
 }
 
 /**
  * Text input that edits a throwaway draft and writes to the ChartDocument once, on Enter/blur,
  * so typing a value is one undo step rather than one per keystroke. Escape reverts.
  */
-export function CommitInput({ value, onCommit, className, placeholder, ariaLabel, inputMode, selectOnFocus }: Props) {
+export function CommitInput({ value, onCommit, className, placeholder, ariaLabel, inputMode, selectOnFocus, title }: Props) {
   const [draft, setDraft] = useState<string | null>(null);
   const cancelled = useRef(false);
 
@@ -28,6 +30,7 @@ export function CommitInput({ value, onCommit, className, placeholder, ariaLabel
     <input
       className={className}
       aria-label={ariaLabel}
+      title={title}
       placeholder={placeholder}
       inputMode={inputMode}
       value={draft ?? value}

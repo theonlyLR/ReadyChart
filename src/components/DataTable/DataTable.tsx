@@ -2,10 +2,15 @@ import { Check, Plus, X } from "lucide-react";
 import type { CellProvenance } from "../../model/types";
 import { addRow, addSeries, confirmAll, confirmCell, isUnverified, itemColorsActive, parseCellNumber, unverifiedCount, removeRow, removeSeries, setCell, setLabel, setSeriesName, setSliceColor } from "../../model/dataOps";
 import { SERIES_PALETTE } from "../../model/defaults";
+import { useRef } from "react";
 import { useDocumentStore } from "../../store/documentStore";
 import { CommitInput } from "../CommitInput";
 import { ColorField } from "../Inspector/fields";
 import { splitGradient } from "./swatch";
+import { ColumnResizer } from "./ColumnResizer";
+import { ICON_BTN, INPUT_PAD, LABEL_MAX, LABEL_MIN, REMOVE_COL, SERIES_DEFAULT, SERIES_MAX, SERIES_MIN, SWATCH, autoFit } from "./columns";
+import { getMeasurer } from "../../render/measurer";
+import { useUiStore } from "../../store/uiStore";
 
 const TINT: Record<CellProvenance, string> = {
   USER_INPUT: "",
@@ -37,6 +42,29 @@ export function DataTable() {
   const radial = type === "pie" || type === "donut";
   // Single-series bars with their own colours: every row gets a swatch (like pie slices) and the header swatch splits.
   const perBar = (type === "bar" || type === "horizontal-bar") && itemColorsActive(data);
+  // Column widths live in the UI store, not the document: resizing is never an undo step and never reaches an export.
+  const labelColWidth = useUiStore((s) => s.labelColWidth);
+  const seriesColWidths = useUiStore((s) => s.seriesColWidths);
+  const { setLabelColWidth, setSeriesColWidth } = useUiStore.getState();
+  const labelTh = useRef<HTMLTableCellElement>(null);
+  const seriesTh = useRef<Record<string, HTMLTableCellElement | null>>({});
+  const m = getMeasurer();
+  const text = (s: string, weight = 400) => m.width(s, 14, weight);
+  const hasSwatch = radial || perBar;
+  // Auto Label width fills the panel (100%). Once the Label column has an explicit width the table is exactly the sum of
+  // its columns, so shrinking a column leaves blank space on the right like a spreadsheet instead of stretching the others.
+  const tableWidth = labelColWidth === null ? "100%" : `${labelColWidth + data.series.reduce((sum, s) => sum + (seriesColWidths[s.id] ?? SERIES_DEFAULT), 0) + REMOVE_COL}px`;
+
+  /** Double-click: the widest label (or the "Label" header), plus the row swatch and cell padding. */
+  const fitLabel = () => setLabelColWidth(autoFit([text("Label", 500) + INPUT_PAD, ...data.labels.map((l) => text(l) + INPUT_PAD + (hasSwatch ? SWATCH : 0))], LABEL_MIN, LABEL_MAX));
+  /** Double-click: the widest number or the series name (plus its swatch and remove button). */
+  const fitSeries = (si: number) => {
+    const s = data.series[si]!;
+    const header = text(s.name, 500) + INPUT_PAD + SWATCH + (data.series.length > 1 ? ICON_BTN : 0);
+    const unverifiedHere = s.provenance.some((p) => isUnverified(p));
+    const cells = s.values.map((v) => text(v === null || v === undefined ? "—" : String(v)) + INPUT_PAD + (unverifiedHere ? ICON_BTN - 6 : 0));
+    setSeriesColWidth(s.id, autoFit([header, ...cells], SERIES_MIN, SERIES_MAX));
+  };
   const barColor = (i: number) => data.series[0]?.pointColorOverrides?.[i] ?? data.series[0]?.color ?? SERIES_PALETTE[0]!;
 
   return (
@@ -57,12 +85,23 @@ export function DataTable() {
         </button>
       </div>
 
-      <table className="w-full table-fixed border-collapse text-left">
+      <table className="table-fixed border-collapse text-left" style={{ width: tableWidth }}>
+        {/* Numeric columns start compact; the Label column (no width until resized) takes the rest of the panel. */}
+        <colgroup>
+          <col style={labelColWidth === null ? undefined : { width: labelColWidth }} />
+          {data.series.map((s) => (
+            <col key={s.id} style={{ width: seriesColWidths[s.id] ?? SERIES_DEFAULT }} />
+          ))}
+          <col style={{ width: REMOVE_COL }} />
+        </colgroup>
         <thead>
           <tr>
-            <th className="w-[84px] pb-1 text-xs font-medium text-slate-500">Label</th>
+            <th ref={labelTh} className="relative pb-1 text-xs font-medium text-slate-500">
+              Label
+              <ColumnResizer ariaLabel="Resize Label column" getWidth={() => labelTh.current?.getBoundingClientRect().width ?? LABEL_MIN} onResize={setLabelColWidth} onAutoFit={fitLabel} />
+            </th>
             {data.series.map((s, si) => (
-              <th key={s.id} className="pb-1 align-bottom">
+              <th key={s.id} ref={(el) => void (seriesTh.current[s.id] = el)} className="relative pb-1 align-bottom">
                 <div className="flex items-center gap-1">
                   {perBar && si === 0 ? (
                     <span
@@ -77,6 +116,7 @@ export function DataTable() {
                   )}
                   <CommitInput
                     ariaLabel={`Series ${si + 1} name`}
+                    title={s.name}
                     className={`${cell} font-medium`}
                     value={s.name}
                     selectOnFocus
@@ -88,9 +128,15 @@ export function DataTable() {
                     </button>
                   )}
                 </div>
+                <ColumnResizer
+                  ariaLabel={`Resize ${s.name} column`}
+                  getWidth={() => seriesTh.current[s.id]?.getBoundingClientRect().width ?? SERIES_DEFAULT}
+                  onResize={(w) => setSeriesColWidth(s.id, w)}
+                  onAutoFit={() => fitSeries(si)}
+                />
               </th>
             ))}
-            <th className="w-6" />
+            <th />
           </tr>
         </thead>
         <tbody>
@@ -106,7 +152,7 @@ export function DataTable() {
                     />
                   )}
                   {perBar && <ColorField ariaLabel={`${label} bar color`} value={barColor(i)} onChange={(c) => update((d) => setSliceColor(d.data, i, c))} />}
-                  <CommitInput ariaLabel={`Label ${i + 1}`} className={cell} value={label} onCommit={(v) => update((d) => setLabel(d.data, i, v))} />
+                  <CommitInput ariaLabel={`Label ${i + 1}`} title={label} className={cell} value={label} onCommit={(v) => update((d) => setLabel(d.data, i, v))} />
                 </div>
               </td>
               {data.series.map((s, si) => (
