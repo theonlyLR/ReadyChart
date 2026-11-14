@@ -34,6 +34,7 @@ export async function probeProxy(fetchImpl: typeof fetch = (...a) => fetch(...a)
 export function createProxyProvider(auth: () => ProxyAuth, fetchImpl: typeof fetch = (...a) => fetch(...a), timeoutMs: number = SCAN_TIMEOUT_MS): VisionProvider {
   return {
     name: "Server proxy",
+    usesPlotImage: true,
     async extractChart(image, hints, signal) {
       const { apiKey, provider } = auth();
       const headers: Record<string, string> = { "content-type": "application/json" };
@@ -46,7 +47,12 @@ export function createProxyProvider(auth: () => ProxyAuth, fetchImpl: typeof fet
           // Covers connecting, the wait for Gemini and reading the reply: past this the on-device scan takes over.
           signal: withDeadline(signal, timeoutMs),
           headers,
-          body: JSON.stringify({ image: await blobToBase64(image), mimeType: image.type || "image/png", hints }),
+          body: JSON.stringify({
+            image: await blobToBase64(image),
+            mimeType: image.type || "image/png",
+            plotImage: hints.plot ? await blobToBase64(hints.plot.image) : undefined,
+            hints: { width: hints.width, height: hints.height, colors: hints.colors, plot: hints.plot ? { width: hints.plot.width, height: hints.plot.height } : undefined },
+          }),
         });
       } catch (e) {
         if (signal?.aborted) throw e; // the user's Cancel

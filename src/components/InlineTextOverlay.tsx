@@ -63,6 +63,7 @@ function Editor({ value, target, doc, onDone }: EditorProps) {
         fontSize: `${(target.fontSize / W) * 100}cqw`,
         lineHeight: `${(target.lineHeight / W) * 100}cqw`,
         fontWeight: target.fontWeight,
+        textAlign: target.align,
         fontFamily: fontStack(doc.brand.fontFamily),
         color: target.tone === "ink" ? theme.ink : theme.muted,
         background: transparent ? "#FFFFFF" : background,

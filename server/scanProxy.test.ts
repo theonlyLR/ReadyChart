@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { GEMINI_MODELS, GEMINI_TIMEOUT_MS, cachedGeminiModel, configuredProvider, handleScan, resetGeminiRoutes, resolveCredentials } from "./scanProxy.ts";
+import { GEMINI_MODELS, GEMINI_TIMEOUT_MS, REFINE_PROMPT, REFINE_TIMEOUT_MS, extractPatch, handleRefine, cachedGeminiModel, configuredProvider, handleScan, resetGeminiRoutes, resolveCredentials } from "./scanProxy.ts";
 
 const body = JSON.stringify({ image: "AAAA", mimeType: "image/png", hints: { width: 10, height: 10, colors: ["#112233"] } });
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
@@ -193,5 +193,86 @@ describe("handleScan", () => {
   });
   it("reports a network failure as upstream", async () => {
     expect(await handleScan({ body, headers: {} }, { OPENAI_API_KEY: "o" }, vi.fn().mockRejectedValue(new Error("boom")))).toMatchObject({ status: 502, body: { error: { code: "upstream" } } });
+  });
+});
+
+describe("two-image scans", () => {
+  const withPlot = JSON.stringify({ image: "AAAA", plotImage: "BBBB", mimeType: "image/png", hints: { width: 100, height: 50, colors: [], plot: { width: 200, height: 100 } } });
+  const reply = () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ labels: ["A"], series: [{ name: "S", values: [1] }] }) }] } }] }), { status: 200, headers: { "content-type": "application/json" } });
+  it("sends the plot crop as a second Gemini image and tells the model about it", async () => {
+    resetGeminiRoutes();
+    const f = vi.fn().mockResolvedValue(reply());
+    await handleScan({ body: withPlot, headers: {} }, { GEMINI_API_KEY: "g" }, f as unknown as typeof fetch);
+    const parts = JSON.parse(String((f.mock.calls[0]![1] as RequestInit).body)).contents[0].parts as { inline_data?: { data: string }; text?: string }[];
+    expect(parts.filter((p) => p.inline_data).map((p) => p.inline_data!.data)).toEqual(["AAAA", "BBBB"]);
+    expect(parts.find((p) => p.text)!.text).toMatch(/TWO images/);
+    expect(parts.find((p) => p.text)!.text).toMatch(/IMAGE 2 \(200x100 px\)/);
+  });
+  it("single-image requests are unchanged", async () => {
+    resetGeminiRoutes();
+    const f = vi.fn().mockResolvedValue(reply());
+    await handleScan({ body, headers: {} }, { GEMINI_API_KEY: "g" }, f as unknown as typeof fetch);
+    const parts = JSON.parse(String((f.mock.calls[0]![1] as RequestInit).body)).contents[0].parts as { inline_data?: unknown; text?: string }[];
+    expect(parts.filter((p) => p.inline_data)).toHaveLength(1);
+    expect(parts.find((p) => p.text)!.text).not.toMatch(/TWO images/);
+  });
+  it("forwards the plot crop to Anthropic and OpenAI too", async () => {
+    const a = vi.fn().mockResolvedValue(new Response(JSON.stringify({ content: [{ type: "text", text: "{\"labels\":[\"A\"]}" }] }), { status: 200 }));
+    await handleScan({ body: withPlot, headers: {} }, { ANTHROPIC_API_KEY: "a" }, a as unknown as typeof fetch);
+    expect(JSON.parse(String((a.mock.calls[0]![1] as RequestInit).body)).messages[0].content.filter((c: { type: string }) => c.type === "image")).toHaveLength(2);
+    const o = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: "{\"labels\":[\"A\"]}" } }] }), { status: 200 }));
+    await handleScan({ body: withPlot, headers: {} }, { OPENAI_API_KEY: "o" }, o as unknown as typeof fetch);
+    expect(JSON.parse(String((o.mock.calls[0]![1] as RequestInit).body)).messages[0].content.filter((c: { type: string }) => c.type === "image_url")).toHaveLength(2);
+  });
+});
+
+describe("POST /api/refine-chart (handleRefine)", () => {
+  const rbody = JSON.stringify({ original: "AAAA", recreated: "BBBB", doc: { title: "T" } });
+  const patch = [{ op: "replace", path: "/title", value: "Fixed" }];
+  const gem = (text: string) => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] }), { status: 200, headers: { "content-type": "application/json" } });
+
+  it("sends both images + the critique prompt to gemini-flash-latest with low thinking, and returns the patch", async () => {
+    const f = vi.fn().mockResolvedValue(gem(JSON.stringify({ patch, notes: "" })));
+    const r = await handleRefine({ body: rbody, headers: {} }, { GEMINI_API_KEY: "g-secret" }, f as unknown as typeof fetch);
+    expect(r).toEqual({ status: 200, body: { patch } });
+    const [url, init] = f.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent");
+    expect(init.headers).toMatchObject({ "x-goog-api-key": "g-secret" });
+    const sent = JSON.parse(String(init.body));
+    expect(sent.generationConfig).toEqual({ responseMimeType: "application/json", thinkingConfig: { thinkingLevel: "low" } });
+    const parts = sent.contents[0].parts as { inline_data?: { data: string }; text?: string }[];
+    expect(parts.filter((p) => p.inline_data).map((p) => p.inline_data!.data)).toEqual(["AAAA", "BBBB"]);
+    expect(parts.find((p) => p.text)!.text).toContain(REFINE_PROMPT);
+    expect(parts.find((p) => p.text)!.text).toContain('"title":"T"');
+  });
+  it("has an 8 second deadline and reports a timeout as upstream (the client then keeps the original document)", async () => {
+    expect(REFINE_TIMEOUT_MS).toBe(8000);
+    const stall = (_u: string, i: RequestInit) => new Promise((_, rej) => i.signal!.addEventListener("abort", () => rej(i.signal!.reason), { once: true }));
+    const started = Date.now();
+    const r = await handleRefine({ body: rbody, headers: {} }, { GEMINI_API_KEY: "g" }, vi.fn(stall) as unknown as typeof fetch, undefined, { timeoutMs: 30 });
+    expect(r).toMatchObject({ status: 502, body: { error: { code: "upstream" } } });
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+  it("only runs on Gemini, and needs a key", async () => {
+    const f = vi.fn();
+    expect(await handleRefine({ body: rbody, headers: {} }, {}, f as unknown as typeof fetch)).toMatchObject({ status: 401 });
+    expect(await handleRefine({ body: rbody, headers: {} }, { ANTHROPIC_API_KEY: "a" }, f as unknown as typeof fetch)).toMatchObject({ status: 400, body: { error: { code: "unsupported" } } });
+    expect(f).not.toHaveBeenCalled();
+  });
+  it("rejects malformed bodies without calling out", async () => {
+    const f = vi.fn();
+    expect((await handleRefine({ body: "x", headers: {} }, { GEMINI_API_KEY: "g" }, f as unknown as typeof fetch)).status).toBe(400);
+    expect((await handleRefine({ body: JSON.stringify({ original: "A" }), headers: {} }, { GEMINI_API_KEY: "g" }, f as unknown as typeof fetch)).status).toBe(400);
+    expect(f).not.toHaveBeenCalled();
+  });
+  it("drops malformed operations, caps the patch, and maps upstream failures", async () => {
+    const messy = JSON.stringify({ patch: [{ op: "replace", path: "/title", value: "ok" }, "junk", { op: 1, path: "/x" }, null] });
+    expect((await handleRefine({ body: rbody, headers: {} }, { GEMINI_API_KEY: "g" }, vi.fn().mockResolvedValue(gem(messy)) as unknown as typeof fetch)).body).toEqual({ patch: [{ op: "replace", path: "/title", value: "ok" }] });
+    expect(extractPatch(JSON.stringify({ patch: Array.from({ length: 200 }, () => ({ op: "replace", path: "/title" })) }))).toHaveLength(60);
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await handleRefine({ body: rbody, headers: {} }, { GEMINI_API_KEY: "g-secret" }, vi.fn().mockResolvedValue(new Response("{}", { status: 429 })) as unknown as typeof fetch)).toMatchObject({ status: 429 });
+    expect(await handleRefine({ body: rbody, headers: {} }, { GEMINI_API_KEY: "g-secret" }, vi.fn().mockResolvedValue(gem("no json here")) as unknown as typeof fetch)).toMatchObject({ status: 502, body: { error: { code: "bad_json" } } });
+    expect(err.mock.calls.join(" ")).not.toContain("g-secret");
+    err.mockRestore();
   });
 });

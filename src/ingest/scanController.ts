@@ -9,10 +9,14 @@ import { useDocumentStore } from "../store/documentStore";
 import { IDLE_SCAN, NO_COMPARE, useUiStore } from "../store/uiStore";
 import { loadScreenshot } from "./image/loadImage";
 import { createLocalProvider, warmOcr } from "./image/localScan";
+import { docForCritique, applyRefinePatch } from "./refinePatch";
+import { renderRecreation } from "./renderRecreation";
+import { requestRefinement } from "../vision/refine";
 import { ScanError, scanChart } from "./image/scanChart";
 import type { ScanResult } from "./image/scanTypes";
 import { loadSampleExtraction } from "./sample";
 import { applyScanResult } from "./toDocument";
+import type { ChartDocument } from "../model/types";
 
 /** How long the card takes to fly into the Compare pill. Mirrored by the transition in ScanStage. */
 export const DOCK_MS = 480;
@@ -50,9 +54,13 @@ export function cancelScan(): void {
 }
 
 /** A configured remote provider, or null when there is none (the on-device scan then runs directly). */
+let refineAvailable = false;
+
 async function pickRemote(): Promise<VisionProvider | null> {
   const { apiKey, provider, model } = useVisionStore.getState();
   const proxy = await probeProxy();
+  // The critique pass runs on Gemini only (fast model, low thinking); skip it quietly for other providers.
+  refineAvailable = proxy.available && (proxy.configured === "gemini" || (!proxy.configured && !!apiKey && provider === "gemini"));
   if (proxy.available) {
     if (!proxy.configured && !apiKey) return null;
     return createProxyProvider(() => ({ apiKey: useVisionStore.getState().apiKey, provider: useVisionStore.getState().provider }));
@@ -103,10 +111,17 @@ export async function startScan(image: Blob, opts: { demo?: boolean } = {}): Pro
     const result = await scanChart(loaded, {
       provider,
       signal: ac.signal,
-      onStage: (stage) => live() && useUiStore.getState().setScan({ stage: Math.max(stage, useUiStore.getState().scan.stage) as 0 | 1 | 2 }),
+      onStage: (stage) => live() && useUiStore.getState().setScan({ stage: Math.max(stage, useUiStore.getState().scan.stage) as 0 | 1 | 2 | 3 }),
     });
     await sleep(MIN_FINAL_STAGE_MS, ac.signal);
-    if (live()) commit(result);
+    if (!live()) return;
+    // Build the document once, optionally let the critique pass fix it, then commit everything as ONE undo step.
+    let doc = applyScanResult(useDocumentStore.getState().doc, result);
+    if (!opts.demo && refineAvailable && !useUiStore.getState().scan.local) {
+      useUiStore.getState().setScan({ stage: 3 });
+      doc = await refine(doc, result, ac.signal);
+    }
+    if (live()) commit(result, doc);
   } catch (e) {
     if (!live() || isAbort(e)) return;
     // Only reachable when the on-device scan found nothing either. Its message is written for end users.
@@ -120,12 +135,29 @@ export function retryScan(): void {
   if (image) void startScan(image, { demo });
 }
 
-function commit(result: ScanResult): void {
+/** Render the recreation, ask for a patch, apply what is allowed. Any failure just returns the document unchanged. */
+async function refine(doc: ChartDocument, result: ScanResult, signal: AbortSignal): Promise<ChartDocument> {
+  try {
+    const { apiKey, provider } = useVisionStore.getState();
+    const recreated = await renderRecreation(doc, result.crop);
+    const patch = await requestRefinement({ original: result.croppedBlob, recreated, doc: docForCritique(doc), auth: { apiKey, provider }, signal });
+    if (!patch || patch.length === 0) return doc;
+    const out = applyRefinePatch(doc, patch);
+    if (out.rejected.length > 0) console.warn("[scan] refinement ops rejected", out.rejected);
+    return out.doc;
+  } catch (e) {
+    if (signal.aborted) throw e;
+    return doc;
+  }
+}
+
+function commit(result: ScanResult, doc: ChartDocument): void {
   const ui = useUiStore.getState();
   const store = useDocumentStore.getState();
   // One replaceDoc = one undo step covering data, labels, units, aspect and every visual field.
-  store.replaceDoc(applyScanResult(store.doc, result));
-  ui.setCompare({ ...NO_COMPARE, blob: result.croppedBlob });
+  store.replaceDoc(doc);
+  // The original is docked invisible (0%): one click on the pill brings it to 50% to verify the match 1:1.
+  ui.setCompare({ ...NO_COMPARE, blob: result.croppedBlob, opacity: 0 });
   ui.setReveal(true);
   ui.setPlaying(false);
   ui.setPlayheadMs(0); // chart starts empty under the dimmed stage, then grows into place

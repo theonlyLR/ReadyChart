@@ -90,6 +90,15 @@ export function deriveDesign(chart: ExtractedChart, crop: PixelBuffer, rect: Pix
     showGridlines: chart.style.showGridlines ?? null,
     showDataLabels: chart.style.showDataLabels ?? null,
     dataLabelPosition: chart.style.dataLabelPosition ?? null,
+    titleAlign: chart.style.titleAlign ?? null,
+    titleScale: chart.style.titleScale ?? null,
+    legendPosition: chart.style.legendPosition ?? null,
+    showMarkers: chart.style.showMarkers ?? null,
+    strokeWidth: chart.style.strokeWidth ?? null,
+    donutInnerRatio: chart.style.donutInnerRatio ?? null,
+    barGapRatio: null,
+    // The model's sharp/rounded call is the fallback; pixel measurement (geometry.ts) overrides it when it can measure.
+    barRadiusRatio: chart.style.barCorners === "sharp" ? 0 : null,
   };
   return { design, seriesColors };
 }

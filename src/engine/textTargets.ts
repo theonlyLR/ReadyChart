@@ -10,6 +10,8 @@ export interface TextTarget {
   fontSize: number;
   fontWeight: number;
   lineHeight: number;
+  /** Text alignment inside the box (titles may be centred). */
+  align: "left" | "center";
   /** Which theme colour the scene uses for this text. */
   tone: "ink" | "muted";
 }
@@ -27,7 +29,8 @@ export function textTargets(L: LayoutResult): TextTarget[] {
     if (b.lines.length === 0) return;
     out.push({
       field,
-      rect: { x: b.x, y: blockTop(b), width, height: b.lines.length * b.lineHeight },
+      rect: { x: b.anchor === "middle" ? b.x - width / 2 : b.x, y: blockTop(b), width, height: b.lines.length * b.lineHeight },
+      align: b.anchor === "middle" ? "center" : "left",
       fontSize: b.fontSize,
       fontWeight: b.fontWeight,
       lineHeight: b.lineHeight,

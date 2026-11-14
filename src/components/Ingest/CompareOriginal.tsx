@@ -70,6 +70,14 @@ export function ComparePill() {
       <Layers size={14} className="text-indigo-600" aria-hidden />
       <span className="font-medium">Compare Original</span>
       <TypeSwitcher />
+      <button
+        title="Show the original at 50% over the recreation (click again to hide it)"
+        aria-pressed={compare.opacity === 50}
+        className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${compare.opacity === 50 ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-white"}`}
+        onClick={() => setCompare({ opacity: compare.opacity === 50 ? 0 : 50 })}
+      >
+        50%
+      </button>
       {!compare.collapsed && (
         <>
           <input

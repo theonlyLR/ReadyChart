@@ -11,6 +11,7 @@ const isAbort = (e: unknown): boolean => e instanceof Error && e.name === "Abort
 export function withFallback(primary: VisionProvider, fallback: VisionProvider, onFallback?: () => void): VisionProvider {
   return {
     name: primary.name,
+    usesPlotImage: primary.usesPlotImage,
     async extractChart(image, hints, signal) {
       try {
         const raw = await primary.extractChart(image, hints, signal);

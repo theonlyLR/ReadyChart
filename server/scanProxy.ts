@@ -15,10 +15,11 @@ const ENV_KEYS: Record<ProviderId, string> = { gemini: "GEMINI_API_KEY", anthrop
 const DEFAULT_MODELS: Record<ProviderId, string> = { gemini: "gemini-flash-latest", anthropic: "claude-sonnet-5-5", openai: "gpt-4o" };
 const MODEL_ENV: Record<ProviderId, string> = { gemini: "GEMINI_MODEL", anthropic: "ANTHROPIC_MODEL", openai: "OPENAI_MODEL" };
 
-export const MAX_BODY_BYTES = 15 * 1024 * 1024;
+// Two images now travel in one request (the screenshot and its 2x plot crop).
+export const MAX_BODY_BYTES = 32 * 1024 * 1024;
 const MIME_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
-export type ErrorCode = "no_key" | "bad_key" | "bad_request" | "rate_limited" | "upstream" | "bad_json";
+export type ErrorCode = "no_key" | "bad_key" | "bad_request" | "rate_limited" | "upstream" | "bad_json" | "unsupported";
 export interface ProxyResult {
   status: number;
   body: unknown;
@@ -45,7 +46,7 @@ export function configuredProvider(env: Env): ProviderId | null {
   return PROVIDERS.find((p) => env[ENV_KEYS[p]]?.trim()) ?? null;
 }
 
-type Call = { image: string; mime: string; prompt: string; model: string; /** Gemini only: models to try in priority order. */ models: string[]; key: string; fetchImpl: typeof fetch; signal?: AbortSignal; timeoutMs: number };
+type Call = { image: string; /** Optional Image 2 (the plot crop, always PNG). */ plotImage?: string; mime: string; prompt: string; model: string; /** Gemini only: models to try in priority order. */ models: string[]; key: string; fetchImpl: typeof fetch; signal?: AbortSignal; timeoutMs: number };
 
 /**
  * Gemini models in failover order, fast and high-availability first so a congested primary costs one short timeout, not a
@@ -93,7 +94,7 @@ async function logFailure(label: string, res: Response): Promise<string> {
 /** Gemini 3.x config: JSON out, medium thinking so it counts every mark and aligns labels. No legacy temperature / thinkingBudget. */
 const geminiBody = (c: Call) =>
   JSON.stringify({
-    contents: [{ role: "user", parts: [{ inline_data: { mime_type: c.mime, data: c.image } }, { text: c.prompt }] }],
+    contents: [{ role: "user", parts: [{ inline_data: { mime_type: c.mime, data: c.image } }, ...(c.plotImage ? [{ inline_data: { mime_type: "image/png", data: c.plotImage } }] : []), { text: c.prompt }] }],
     generationConfig: { responseMimeType: "application/json", thinkingConfig: { thinkingLevel: "medium" } },
   });
 
@@ -144,7 +145,7 @@ const adapters: Record<ProviderId, (c: Call) => Promise<Response>> = {
       body: JSON.stringify({
         model: c.model,
         max_tokens: 4096,
-        messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: c.mime, data: c.image } }, { type: "text", text: c.prompt }] }],
+        messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: c.mime, data: c.image } }, ...(c.plotImage ? [{ type: "image", source: { type: "base64", media_type: "image/png", data: c.plotImage } }] : []), { type: "text", text: c.prompt }] }],
       }),
     }),
   openai: (c) =>
@@ -156,7 +157,7 @@ const adapters: Record<ProviderId, (c: Call) => Promise<Response>> = {
         model: c.model,
         temperature: 0,
         response_format: { type: "json_object" },
-        messages: [{ role: "user", content: [{ type: "text", text: c.prompt }, { type: "image_url", image_url: { url: `data:${c.mime};base64,${c.image}` } }] }],
+        messages: [{ role: "user", content: [{ type: "text", text: c.prompt }, { type: "image_url", image_url: { url: `data:${c.mime};base64,${c.image}` } }, ...(c.plotImage ? [{ type: "image_url", image_url: { url: `data:image/png;base64,${c.plotImage}` } }] : [])] }],
       }),
     }),
 };
@@ -181,7 +182,7 @@ export async function handleScan(req: ScanRequest, env: Env, fetchImpl: typeof f
   const creds = resolveCredentials(env, req.headers);
   if (!creds) return fail(401, "no_key", "No vision API key is configured. Add one to .env.local or enter it in the app.");
 
-  let parsed: { image?: unknown; mimeType?: unknown; hints?: { width?: unknown; height?: unknown; colors?: unknown } };
+  let parsed: { image?: unknown; plotImage?: unknown; mimeType?: unknown; hints?: { width?: unknown; height?: unknown; colors?: unknown; plot?: { width?: unknown; height?: unknown } } };
   try {
     parsed = JSON.parse(req.body);
   } catch {
@@ -190,16 +191,18 @@ export async function handleScan(req: ScanRequest, env: Env, fetchImpl: typeof f
   const mime = typeof parsed.mimeType === "string" ? parsed.mimeType : "";
   if (typeof parsed.image !== "string" || parsed.image.length === 0 || !MIME_TYPES.includes(mime)) return fail(400, "bad_request", "Send { image: base64, mimeType: png|jpeg|webp }.");
   const h = parsed.hints ?? {};
+  const plotImage = typeof parsed.plotImage === "string" && parsed.plotImage.length > 0 ? parsed.plotImage : undefined;
   const prompt = buildPrompt({
     width: Number(h.width) || 0,
     height: Number(h.height) || 0,
     colors: Array.isArray(h.colors) ? h.colors.filter((c): c is string => typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c)).slice(0, 8) : [],
+    plot: plotImage && Number(h.plot?.width) > 0 && Number(h.plot?.height) > 0 ? { width: Number(h.plot!.width), height: Number(h.plot!.height) } : undefined,
   });
 
   const pinned = env[MODEL_ENV[creds.provider]]?.trim();
   let res: Response;
   try {
-    res = await adapters[creds.provider]({ image: parsed.image, mime, prompt, model: pinned || DEFAULT_MODELS[creds.provider], models: pinned ? [pinned] : [...GEMINI_MODELS], key: creds.key, fetchImpl, signal, timeoutMs: opts.timeoutMs ?? (creds.provider === "gemini" ? GEMINI_TIMEOUT_MS : OTHER_TIMEOUT_MS) });
+    res = await adapters[creds.provider]({ image: parsed.image, plotImage, mime, prompt, model: pinned || DEFAULT_MODELS[creds.provider], models: pinned ? [pinned] : [...GEMINI_MODELS], key: creds.key, fetchImpl, signal, timeoutMs: opts.timeoutMs ?? (creds.provider === "gemini" ? GEMINI_TIMEOUT_MS : OTHER_TIMEOUT_MS) });
   } catch {
     return fail(502, "upstream", "Couldn't reach the vision provider.");
   }
@@ -218,6 +221,77 @@ export async function handleScan(req: ScanRequest, env: Env, fetchImpl: typeof f
     return { status: 200, body: { provider: creds.provider, extraction } };
   } catch (e) {
     return fail(502, "bad_json", e instanceof VisionError ? e.message : "The provider's reply couldn't be read.");
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// POST /api/refine-chart: closed-loop "render & critique" pass
+// ---------------------------------------------------------------------------------------------
+
+/** Fast and cheap on purpose: this is a polish pass, so it never gets a model cascade or a long wait. */
+export const REFINE_MODEL = "gemini-flash-latest";
+export const REFINE_TIMEOUT_MS = 8000;
+
+export const REFINE_PROMPT =
+  "Compare the Original Chart (Image 1) against the Recreated Chart (Image 2). Identify any discrepancies in missing/extra bars or slices, bar heights/proportions, colors, chart type, title/subtitle/source text, axis/gridline visibility, legend placement, or label formatting. Return a minimal JSON patch to fix every visual or data discrepancy.";
+
+/** What the patch may touch. The client enforces this too (src/ingest/refinePatch.ts); the prompt just keeps the model inside it. */
+const REFINE_RULES = `Reply with ONE JSON object and nothing else: {"patch":[ ...RFC 6902 operations... ],"notes":""}. Use an empty patch when the recreation already matches.
+Operations: "replace" (and "add"/"remove" only for /data/series/0/pointColorOverrides/<index>). Allowed paths:
+/title, /subtitle, /sourceFooter, /canvas/background, /canvas/textColor, /canvas/titleAlign ("left"|"center"), /canvas/titleScale (0.6..1.6),
+/geometry/type ("bar","horizontal-bar","stacked-bar","line","area","pie","donut"), /geometry/barRadius ([tl,tr,br,bl] px), /geometry/barGapRatio (0..0.9), /geometry/strokeWidth, /geometry/curveTension, /geometry/donutInnerRatio, /geometry/showGridlines, /geometry/showDataLabels, /geometry/showXAxis, /geometry/showYAxis, /geometry/dataLabelPosition, /geometry/legendPosition ("top"|"bottom"|"hidden"), /geometry/showMarkers, /geometry/groupSmallSlicesBelowPct,
+/data/unitPrefix, /data/unitSuffix, /data/labels/<i>, /data/series/<s>/name, /data/series/<s>/color, /data/series/<s>/values/<i> (number or null), /data/series/0/pointColorOverrides/<i>.
+Colors are "#RRGGBB". Do not add or remove rows or series. Change only what is visibly wrong. Image 1 is the Original Chart, Image 2 the Recreated Chart.`;
+
+export interface RefineRequest {
+  body: string;
+  headers: Env;
+}
+
+/** Pull a patch array out of the model's reply, dropping anything that isn't shaped like an operation. */
+export function extractPatch(text: string): unknown[] {
+  const obj = extractJson(text) as { patch?: unknown } | null;
+  const patch = Array.isArray(obj?.patch) ? obj!.patch : [];
+  return patch.filter((op): op is Record<string, unknown> => typeof op === "object" && op !== null && typeof (op as { op?: unknown }).op === "string" && typeof (op as { path?: unknown }).path === "string").slice(0, 60);
+}
+
+/** Gemini only: one fast attempt, hard 8 s deadline, no cascade. Anything else answers "unsupported" and the client skips the pass. */
+export async function handleRefine(req: RefineRequest, env: Env, fetchImpl: typeof fetch = fetch, signal?: AbortSignal, opts: { timeoutMs?: number } = {}): Promise<ProxyResult> {
+  const creds = resolveCredentials(env, req.headers);
+  if (!creds) return fail(401, "no_key", "No vision API key is configured.");
+  if (creds.provider !== "gemini") return fail(400, "unsupported", "Refinement needs a Gemini key.");
+  let parsed: { original?: unknown; recreated?: unknown; doc?: unknown };
+  try {
+    parsed = JSON.parse(req.body);
+  } catch {
+    return fail(400, "bad_request", "Request body must be JSON.");
+  }
+  if (typeof parsed.original !== "string" || typeof parsed.recreated !== "string" || !parsed.original || !parsed.recreated || typeof parsed.doc !== "object" || parsed.doc === null) {
+    return fail(400, "bad_request", "Send { original: base64 png, recreated: base64 png, doc }.");
+  }
+  const prompt = `${REFINE_PROMPT}\n${REFINE_RULES}\nCurrent ChartDocument (JSON):\n${JSON.stringify(parsed.doc)}`;
+  let res: Response;
+  try {
+    res = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_MODEL?.trim() || REFINE_MODEL)}:generateContent`, {
+      method: "POST",
+      signal: withDeadline(signal, opts.timeoutMs ?? REFINE_TIMEOUT_MS),
+      headers: { "content-type": "application/json", "x-goog-api-key": creds.key },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ inline_data: { mime_type: "image/png", data: parsed.original } }, { inline_data: { mime_type: "image/png", data: parsed.recreated } }, { text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json", thinkingConfig: { thinkingLevel: "low" } },
+      }),
+    });
+  } catch {
+    return fail(502, "upstream", "The refinement pass timed out or couldn't connect.");
+  }
+  if (!res.ok) {
+    await logFailure("gemini refine", res);
+    return res.status === 401 ? fail(401, "bad_key", "The API key was rejected.") : res.status === 429 ? fail(429, "rate_limited", "Rate limited.") : fail(502, "upstream", `The refinement pass returned an error (${res.status}).`);
+  }
+  try {
+    return { status: 200, body: { patch: extractPatch(replyText("gemini", await res.json())) } };
+  } catch (e) {
+    return fail(502, "bad_json", e instanceof VisionError ? e.message : "The refinement reply couldn't be read.");
   }
 }
 
@@ -266,7 +340,24 @@ export function scanChartProxy(env: Env): Plugin {
       })();
     });
   };
-  return { name: "readychart-scan-chart", configureServer: install, configurePreviewServer: install };
+  const installRefine = (server: Server) => {
+    server.middlewares.use("/api/refine-chart", (req, res, next) => {
+      const path = (req.url ?? "/").split("?")[0];
+      if (req.method !== "POST" || (path !== "/" && path !== "")) return next();
+      const abort = new AbortController();
+      res.on("close", () => {
+        if (!res.writableEnded) abort.abort();
+      });
+      void (async () => {
+        const body = await readBody(req);
+        if (body === null) return send(res, 413, { error: { code: "bad_request", message: "Images are too large." } });
+        const r = await handleRefine({ body, headers: { "x-api-key": first(req.headers["x-api-key"]), "x-provider": first(req.headers["x-provider"]) } }, env, fetch, abort.signal);
+        if (!abort.signal.aborted) send(res, r.status, r.body);
+      })();
+    });
+  };
+  const both = (server: Server) => (install(server), installRefine(server));
+  return { name: "readychart-scan-chart", configureServer: both, configurePreviewServer: both };
 }
 
 const first = (v: string | string[] | undefined): string | undefined => (Array.isArray(v) ? v[0] : v);

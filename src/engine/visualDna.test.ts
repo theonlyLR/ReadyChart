@@ -120,3 +120,52 @@ describe("export parity", () => {
     for (const t of valueLabels(doc)) expect(svg).toContain(`y="${t.y}"`);
   });
 });
+
+describe("layout DNA: title alignment, title scale, legend position, point markers", () => {
+  const multi = () => {
+    const d = createDefaultDocument();
+    d.data.series.push({ id: "s2", name: "Costs", color: "#F59E0B", values: [10, 20, 15, 30], provenance: ["USER_INPUT", "USER_INPUT", "USER_INPUT", "USER_INPUT"] });
+    return d;
+  };
+  const titleNode = (d: ChartDocument) => texts(buildScene(d, m).nodes).find((t) => t.text === d.title)!;
+
+  it("centres the title and subtitle, and the inline-edit target follows", () => {
+    const d = createDefaultDocument();
+    const left = titleNode(d);
+    expect(left.anchor).toBe("start");
+    d.canvas.titleAlign = "center";
+    const c = titleNode(d);
+    expect(c.anchor).toBe("middle");
+    expect(c.x).toBeGreaterThan(left.x);
+    expect(texts(buildScene(d, m).nodes).find((t) => t.text === d.subtitle)!.anchor).toBe("middle");
+  });
+  it("scales the title font relative to the default, within 0.6..1.6", () => {
+    const d = createDefaultDocument();
+    const base = titleNode(d).fontSize;
+    d.canvas.titleScale = 1.5;
+    expect(titleNode(d).fontSize).toBeCloseTo(base * 1.5);
+    d.canvas.titleScale = 9;
+    expect(titleNode(d).fontSize).toBeCloseTo(base * 1.6);
+  });
+  it("hides the legend, or moves it to the bottom above the footer and gives the plot the room it frees at the top", () => {
+    const d = multi();
+    const top = computeLayout(d, m);
+    expect(top.legend).not.toBeNull();
+    d.geometry.legendPosition = "bottom";
+    const bottom = computeLayout(d, m);
+    expect(bottom.legend!.rect.y).toBeGreaterThan(bottom.plot.y + bottom.plot.height - 1);
+    expect(bottom.legend!.rect.y + bottom.legend!.rect.height).toBeLessThanOrEqual(bottom.regions.footer.y + 0.5);
+    d.geometry.legendPosition = "hidden";
+    const hidden = computeLayout(d, m);
+    expect(hidden.legend).toBeNull();
+    expect(hidden.plot.height).toBeGreaterThan(top.plot.height);
+  });
+  it("point markers on line charts can be turned off", () => {
+    const d = createDefaultDocument();
+    d.geometry.type = "line";
+    const count = (doc: ChartDocument) => buildScene(doc, m).nodes.filter((n) => n.kind === "path" && n.fill === doc.data.series[0]!.color).length;
+    const withMarkers = count(d);
+    d.geometry.showMarkers = false;
+    expect(count(d)).toBeLessThan(withMarkers);
+  });
+});

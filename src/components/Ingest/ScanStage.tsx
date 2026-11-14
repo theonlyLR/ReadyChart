@@ -4,7 +4,7 @@ import { useObjectUrl } from "../../hooks/useObjectUrl";
 import { DOCK_MS, cancelScan, retryScan } from "../../ingest/scanController";
 import { useUiStore } from "../../store/uiStore";
 
-const STAGES = ["Detecting chart bounds & type...", "Sampling exact pixel palette...", "Reconstructing labels & data..."];
+const STAGES = ["Detecting chart bounds & type...", "Sampling exact pixel palette...", "Reconstructing labels & data...", "Refining visual accuracy..."];
 /** The request is one long wait, so the pill moves from step 1 to 2 on a timer; step 3 only on the real response. */
 const STAGE_1_AFTER_MS = 1700;
 

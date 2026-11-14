@@ -93,6 +93,24 @@ export function applyScanResult(doc: ChartDocument, scan: ScanResult): ChartDocu
   if (design.showDataLabels !== null) g.showDataLabels = design.showDataLabels;
   if (design.dataLabelPosition !== null) g.dataLabelPosition = design.dataLabelPosition;
 
+  // Layout DNA
+  if (design.titleAlign) next.canvas.titleAlign = design.titleAlign;
+  if (design.titleScale != null) next.canvas.titleScale = design.titleScale;
+  if (design.legendPosition) g.legendPosition = design.legendPosition;
+  if (design.showMarkers != null) g.showMarkers = design.showMarkers;
+  if (design.strokeWidth != null) g.strokeWidth = design.strokeWidth;
+  if (design.donutInnerRatio != null) g.donutInnerRatio = design.donutInnerRatio;
+  if (design.barGapRatio != null) g.barGapRatio = Math.min(0.9, Math.max(0, design.barGapRatio));
+  if (design.barRadiusRatio != null) {
+    // The ratio is relative to the source bar width; the document's radius is in canvas pixels, so convert through an
+    // estimate of the new bar width (plot width over bar count, minus the gap). Sharp stays exactly sharp.
+    const n = Math.max(1, next.data.labels.length);
+    const plotW = Math.max(200, size.width - next.canvas.padding[1] - next.canvas.padding[3] - 120);
+    const barW = (plotW / n) * (1 - g.barGapRatio);
+    const r = design.barRadiusRatio === 0 ? 0 : Math.min(48, Math.round(Math.min(0.5, design.barRadiusRatio) * barW));
+    g.barRadius = [r, r, 0, 0];
+  }
+
   const single = next.data.series.length === 1 && (g.type === "bar" || g.type === "horizontal-bar");
   if (single && Object.keys(design.barColors).length > 0) next.data.series[0]!.pointColorOverrides = { ...design.barColors };
   return next;

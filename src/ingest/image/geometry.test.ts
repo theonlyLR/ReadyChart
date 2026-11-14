@@ -175,13 +175,14 @@ describe("schema + prompt", () => {
     expect(r.chart?.elementBounds).toBeUndefined();
     expect(r.warnings.join(" ")).toMatch(/1 element boxes for 3 labels/);
   });
-  it("the prompt demands geometry-first types, elementBounds, equal lengths and axisScale", () => {
+  it("the prompt demands geometry-first types, elements, equal lengths, plotBox, zeroBaselineY and yAxisTicks", () => {
     const p = buildPrompt({ width: 1, height: 1, colors: [] });
     expect(p).toMatch(/NEVER "pie" or "donut"/);
-    expect(p).toMatch(/"elementBounds"/);
+    expect(p).toMatch(/"elements"/);
     expect(p).toMatch(/exactly the same number of entries/);
-    expect(p).toMatch(/"axisScale"/);
-    expect(p).toMatch(/zeroBaselineCoord/);
+    expect(p).toMatch(/"plotBox"/);
+    expect(p).toMatch(/zeroBaselineY/);
+    expect(p).toMatch(/yAxisTicks/);
   });
 });
 

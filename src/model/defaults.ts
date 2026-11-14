@@ -21,6 +21,8 @@ export function createDefaultDocument(): ChartDocument {
       background: "#FFFFFF",
       transparent: false,
       textColor: null,
+      titleAlign: "left",
+      titleScale: 1,
       padding: [72, 96, 72, 96],
     },
     data: {
@@ -55,6 +57,8 @@ export function createDefaultDocument(): ChartDocument {
       showXAxis: true,
       showYAxis: true,
       dataLabelPosition: "outside-top",
+      legendPosition: "top",
+      showMarkers: true,
       groupSmallSlicesBelowPct: 3,
     },
     motion: {

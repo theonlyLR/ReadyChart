@@ -27,7 +27,7 @@ export function lineNodes(doc: ChartDocument, L: LayoutResult, theme: Theme, m: 
   const step = plot.width / Math.max(1, n);
   const curve = g.curveTension <= 0 ? curveLinear : curveCardinal.tension(1 - Math.min(1, g.curveTension));
   const nodes: SceneNode[] = [];
-  const showMarkers = n <= 40;
+  const showMarkers = g.showMarkers && n <= 40;
 
   doc.data.series.forEach((s) => {
     const pts = s.values.map((v, i) => ({ x: plot.x + (i + 0.5) * step, v, i }));

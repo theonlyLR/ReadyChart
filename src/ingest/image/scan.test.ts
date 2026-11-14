@@ -134,6 +134,7 @@ describe("applyScanResult", () => {
     chart: c,
     table: extractionToTable(c, []),
     croppedBlob: new Blob([]),
+    crop: { width: 100, height: 100 },
     warnings: [],
     design: { background: "#141828", textColor: "#F8FAFC", barColors: { 2: "#F08C14" }, aspect: "4:5", showXAxis: null, showYAxis: false, showGridlines: false, showDataLabels: true, dataLabelPosition: "inside-top", ...design },
   });

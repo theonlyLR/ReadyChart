@@ -137,6 +137,16 @@ export function Inspector() {
         <TextField label="Title" value={doc.title} onCommit={(v) => set((d) => void (d.title = v))} />
         <TextField label="Subtitle" value={doc.subtitle} onCommit={(v) => set((d) => void (d.subtitle = v))} />
         <TextField label="Source footer" value={doc.sourceFooter} onCommit={(v) => set((d) => void (d.sourceFooter = v))} />
+        <SelectField
+          label="Title alignment"
+          value={doc.canvas.titleAlign}
+          options={[
+            { value: "left", label: "Left" },
+            { value: "center", label: "Center" },
+          ]}
+          onChange={(v) => set((d) => void (d.canvas.titleAlign = v))}
+        />
+        <SliderField label="Title size" value={doc.canvas.titleScale} min={0.6} max={1.6} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => set((d) => void (d.canvas.titleScale = v))} />
       </Section>
 
       <Section title="Canvas">
@@ -187,6 +197,7 @@ export function Inspector() {
         {isLine && (
           <>
             <SliderField label="Stroke width" value={g.strokeWidth} min={1} max={16} format={px} onChange={(v) => set((d) => void (d.geometry.strokeWidth = v))} />
+            <ToggleField label="Point markers" value={g.showMarkers} onChange={(v) => set((d) => void (d.geometry.showMarkers = v))} />
             <SliderField label="Curve smoothness" value={g.curveTension} min={0} max={1} step={0.01} format={pct} onChange={(v) => set((d) => void (d.geometry.curveTension = v))} />
           </>
         )}
@@ -196,6 +207,16 @@ export function Inspector() {
         {isRadial && (
           <SliderField label="Group slices below" value={g.groupSmallSlicesBelowPct} min={0} max={15} step={0.5} format={(v) => (v === 0 ? "off" : `${v}%`)} onChange={(v) => set((d) => void (d.geometry.groupSmallSlicesBelowPct = v))} />
         )}
+        <SelectField
+          label="Legend"
+          value={g.legendPosition}
+          options={[
+            { value: "top", label: "Top" },
+            { value: "bottom", label: "Bottom" },
+            { value: "hidden", label: "Hidden" },
+          ]}
+          onChange={(v) => set((d) => void (d.geometry.legendPosition = v))}
+        />
         <ToggleField label="Data labels" value={g.showDataLabels} onChange={(v) => set((d) => void (d.geometry.showDataLabels = v))} />
       </Section>
 

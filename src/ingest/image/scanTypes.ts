@@ -1,4 +1,4 @@
-import type { AspectPreset, DataLabelPosition } from "../../model/types";
+import type { AspectPreset, DataLabelPosition, LegendPosition, TitleAlign } from "../../model/types";
 import type { ParsedTable } from "../parseTable";
 import type { ExtractedChart } from "../../vision/VisionProvider";
 
@@ -16,6 +16,17 @@ export interface ScanDesign {
   showGridlines: boolean | null;
   showDataLabels: boolean | null;
   dataLabelPosition: DataLabelPosition | null;
+  /** Layout DNA. All optional: null / undefined keeps the document's current value. */
+  titleAlign?: TitleAlign | null;
+  titleScale?: number | null;
+  legendPosition?: LegendPosition | null;
+  showMarkers?: boolean | null;
+  strokeWidth?: number | null;
+  donutInnerRatio?: number | null;
+  /** Gap between bars as a share of the bar pitch, measured from the element boxes. */
+  barGapRatio?: number | null;
+  /** Corner radius as a share of the bar width, measured from pixels (0 = sharp). */
+  barRadiusRatio?: number | null;
 }
 
 export interface ScanResult {
@@ -25,5 +36,7 @@ export interface ScanResult {
   design: ScanDesign;
   /** Cropped original, shown by the Compare Original overlay. */
   croppedBlob: Blob;
+  /** Pixel size of the cropped original. */
+  crop: { width: number; height: number };
   warnings: string[];
 }

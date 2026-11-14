@@ -5,12 +5,13 @@ import type { Platform } from "../components/FlightCheck/safeZones";
 
 export type Backdrop = "checker" | "dark" | "white";
 
+/** 0 detecting, 1 sampling, 2 reconstructing, 3 refining (closed-loop critique). */
 /** Screenshot scan overlay. Pure UI state: the chart document is only touched when a scan succeeds. */
 export interface ScanUi {
   /** "docking" = the result is applied and the card is flying into the Compare pill. */
   status: "idle" | "scanning" | "error" | "docking";
   /** Real milestone reached (0 detecting, 1 sampling, 2 reconstructing). The pill may run ahead of 0 -> 1 on a timer. */
-  stage: 0 | 1 | 2;
+  stage: 0 | 1 | 2 | 3;
   image: Blob | null;
   error: string | null;
   /** The on-device scan is doing the reading (no remote vision service available or it failed). Not an error. */

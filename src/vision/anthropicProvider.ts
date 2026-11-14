@@ -20,8 +20,10 @@ export async function blobToBase64(blob: Blob): Promise<string> {
 export function createAnthropicProvider(apiKey: string, model: string = DEFAULT_VISION_MODEL, fetchImpl: typeof fetch = (...a) => fetch(...a)): VisionProvider {
   return {
     name: "Anthropic",
+    usesPlotImage: true,
     async extractChart(image, hints, signal) {
       const data = await blobToBase64(image);
+      const plot = hints.plot ? { data: await blobToBase64(hints.plot.image), width: hints.plot.width, height: hints.plot.height } : null;
       let res: Response;
       try {
         res = await fetchImpl(ENDPOINT, {
@@ -41,7 +43,8 @@ export function createAnthropicProvider(apiKey: string, model: string = DEFAULT_
                 role: "user",
                 content: [
                   { type: "image", source: { type: "base64", media_type: image.type || "image/png", data } },
-                  { type: "text", text: buildPrompt(hints) },
+                  ...(plot ? [{ type: "image", source: { type: "base64", media_type: "image/png", data: plot.data } }] : []),
+                  { type: "text", text: buildPrompt({ width: hints.width, height: hints.height, colors: hints.colors, plot: plot ? { width: plot.width, height: plot.height } : undefined }) },
                 ],
               },
             ],

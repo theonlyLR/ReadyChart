@@ -14,7 +14,9 @@ import { PILL_PAD_RATIO, resolveLogoTreatment } from "../brand/contrast";
 
 export interface TextBlock {
   lines: string[];
+  /** Left edge for "start", centre for "middle". */
   x: number;
+  anchor: "start" | "middle";
   /** Baseline of the first line. */
   y: number;
   fontSize: number;
@@ -91,7 +93,7 @@ export function computeLayout(doc: ChartDocument, m: TextMeasurer): LayoutResult
   const { width: W, height: H, padding } = doc.canvas;
   const [pt, pr, pb, pl] = padding;
   const u = Math.min(W, H) / 1080;
-  const fonts = { title: 44 * u, subtitle: 24 * u, footer: 18 * u, label: 20 * u, value: 20 * u };
+  const fonts = { title: 44 * u * Math.min(1.6, Math.max(0.6, doc.canvas.titleScale || 1)), subtitle: 24 * u, footer: 18 * u, label: 20 * u, value: 20 * u };
   const content: Rect = { x: pl, y: pt, width: Math.max(1, W - pl - pr), height: Math.max(1, H - pt - pb) };
   const orientation = orientationOf(doc.geometry.type);
   const gap = 24 * u;
@@ -144,11 +146,14 @@ export function computeLayout(doc: ChartDocument, m: TextMeasurer): LayoutResult
 
   let cursor = content.y;
   const titleLines = wrapText(doc.title, headerW, fonts.title, 600, m, 2);
-  const title: TextBlock = { lines: titleLines, x: hx0, y: baseline(cursor, fonts.title), fontSize: fonts.title, fontWeight: 600, lineHeight: lh(fonts.title) };
+  const centered = doc.canvas.titleAlign === "center";
+  const headerX = centered ? hx0 + headerW / 2 : hx0;
+  const anchor = centered ? ("middle" as const) : ("start" as const);
+  const title: TextBlock = { lines: titleLines, x: headerX, anchor, y: baseline(cursor, fonts.title), fontSize: fonts.title, fontWeight: 600, lineHeight: lh(fonts.title) };
   cursor += titleLines.length * lh(fonts.title);
   if (titleLines.length) cursor += 8 * u;
   const subLines = wrapText(doc.subtitle, headerW, fonts.subtitle, 400, m, 2);
-  const subtitle: TextBlock = { lines: subLines, x: hx0, y: baseline(cursor, fonts.subtitle), fontSize: fonts.subtitle, fontWeight: 400, lineHeight: lh(fonts.subtitle) };
+  const subtitle: TextBlock = { lines: subLines, x: headerX, anchor, y: baseline(cursor, fonts.subtitle), fontSize: fonts.subtitle, fontWeight: 400, lineHeight: lh(fonts.subtitle) };
   cursor += subLines.length * lh(fonts.subtitle);
   const textBottom = cursor;
   const textRect: Rect = { x: hx0, y: content.y, width: headerW, height: Math.max(0, textBottom - content.y) };
@@ -162,14 +167,16 @@ export function computeLayout(doc: ChartDocument, m: TextMeasurer): LayoutResult
   const footH = footLines.length * lh(fonts.footer);
   const contentBottom = content.y + content.height;
   const footTop = contentBottom - footH;
-  const footer: TextBlock = { lines: footLines, x: fx0, y: baseline(footTop, fonts.footer), fontSize: fonts.footer, fontWeight: 400, lineHeight: lh(fonts.footer) };
+  const footer: TextBlock = { lines: footLines, x: fx0, anchor: "start", y: baseline(footTop, fonts.footer), fontSize: fonts.footer, fontWeight: 400, lineHeight: lh(fonts.footer) };
   const footerRect: Rect = { x: fx0, y: footTop, width: footerW, height: footH };
   let bodyBottom = footLines.length ? footTop - gap * 0.75 : contentBottom;
   if (logoBottom && logoBox) bodyBottom = Math.min(bodyBottom, logoBox.y - gap * 0.75);
 
   // --- Legend ---------------------------------------------------------------------------------
   const legendEntries: { label: string; color: string }[] =
-    orientation === "radial"
+    doc.geometry.legendPosition === "hidden"
+      ? []
+      : orientation === "radial"
       ? pieGuard(doc).blocked
         ? []
         : buildSlices(doc).map((s) => ({ label: s.label, color: s.color }))
@@ -200,6 +207,14 @@ export function computeLayout(doc: ChartDocument, m: TextMeasurer): LayoutResult
       return { items, rect };
     };
 
+    if (doc.geometry.legendPosition === "bottom") {
+      // Along the bottom, just above the footer: measure its height, then reserve exactly that much from the body.
+      const probe = place(content.x, content.x + content.width, 0);
+      const top = bodyBottom - probe.rect.height;
+      const atBottom = place(content.x, content.x + content.width, top);
+      legend = { items: atBottom.items, swatch, rect: atBottom.rect };
+      bodyBottom = top - gap * 0.6;
+    } else {
     // Beside a top-anchored logo, the legend flows into the space next to it, but only if every row fits
     // inside the logo's band (so its rect never overlaps the logo). Otherwise it drops below the logo.
     let placed: { items: LegendItem[]; rect: Rect } | null = null;
@@ -217,6 +232,7 @@ export function computeLayout(doc: ChartDocument, m: TextMeasurer): LayoutResult
     legend = { items: placed.items, swatch, rect: placed.rect };
     const legendEnd = placed.rect.y + placed.rect.height + gap * 0.6;
     bodyTop = besideLogo ? Math.max(legendEnd, logoBottomY + gap * 0.8) : legendEnd;
+    }
   }
 
   // --- Plot area ------------------------------------------------------------------------------

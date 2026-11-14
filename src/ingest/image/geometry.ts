@@ -1,4 +1,4 @@
-import type { ExtractedChart, NormBounds } from "../../vision/VisionProvider";
+import type { AxisScale, ExtractedChart, NormBounds } from "../../vision/VisionProvider";
 import { rgbDistance, rgbToHex } from "./barDetect";
 import type { PixelRect } from "./crop";
 import type { PixelBuffer } from "./sampleColors";
@@ -14,8 +14,8 @@ type RGB = [number, number, number];
 
 /** Pixels this close (RGB distance) to the background or text colour are not bar fill. */
 export const NOT_FILL_DISTANCE = 45;
-/** OCR vs geometry disagreement above this ratio means the geometric value wins. */
-export const CONTRADICTION_RATIO = 0.15;
+/** OCR vs geometry disagreement above 10% means the geometric value wins (and is flagged for review). */
+export const CONTRADICTION_RATIO = 0.1;
 /** Bars shorter than this (px) are too coarse to adjudicate a printed value with. */
 const MIN_ADJUDICATE_PX = 6;
 /** A bar-size scale needs most anchors to agree, or the axis is truncated / non-linear and we don't "correct" anything. */
@@ -161,6 +161,8 @@ export interface GeometryResult {
   chart: ExtractedChart;
   /** Text-safe median fill colour per mark (hex), null where unmeasurable. */
   colors: (string | null)[];
+  /** Bar styling read from the pixels: gap as a share of the bar pitch, corner radius as a share of the bar width. */
+  barStyle?: { barGapRatio: number | null; barRadiusRatio: number | null };
 }
 
 interface Mark {
@@ -169,43 +171,124 @@ interface Mark {
   far: number;
 }
 
+/** A linear map from a coordinate along the value axis (crop px) to a data value, plus where value 0 sits. */
+export interface AxisMap {
+  value: (coord: number) => number;
+  zeroCoord: number | null;
+}
+
 /**
- * Verify and fill in a single-series bar chart from pixel geometry. Applies to "bar" and "horizontal-bar" with one
- * box per label; anything else is returned untouched.
- *  - A null value (unreadable sliver), or any value in a chart with no printed labels, is computed from the bar's
- *    measured size using the axis scale (axisScale) or the scale implied by the other bars, and tagged estimated.
- *  - A printed/OCR value that disagrees with its bar's size by more than 15% is replaced by the geometric value and
- *    marked low-confidence (only when the other bars agree on a consistent scale).
+ * Build the value scale from the model's axis reading. Two or more ticks give a least-squares line (exact for linear
+ * axes, works even when the axis doesn't start at 0). One tick (or the legacy top tick) plus the zero baseline gives a
+ * line through (zero, 0). Coordinates arrive normalised to the full image and are converted into crop pixels.
+ */
+export function buildAxisMap(ax: AxisScale | undefined, axisDim: number, axisOffset: number): AxisMap | null {
+  if (!ax) return null;
+  const px = (c: number) => (c / 1000) * axisDim - axisOffset;
+  const zero = ax.zeroBaselineCoord == null ? null : px(ax.zeroBaselineCoord);
+  const pts = (ax.ticks ?? []).map((t) => ({ c: px(t.coord), v: t.value }));
+  if (pts.length === 0 && ax.topTickCoord != null && ax.topTickValue != null) pts.push({ c: px(ax.topTickCoord), v: ax.topTickValue });
+  if (pts.length >= 2) {
+    const mc = pts.reduce((a, p) => a + p.c, 0) / pts.length;
+    const mv = pts.reduce((a, p) => a + p.v, 0) / pts.length;
+    const varC = pts.reduce((a, p) => a + (p.c - mc) ** 2, 0);
+    if (varC > 1e-9) {
+      const b = pts.reduce((a, p) => a + (p.c - mc) * (p.v - mv), 0) / varC;
+      if (b !== 0) {
+        const a0 = mv - b * mc;
+        return { value: (c) => a0 + b * c, zeroCoord: -a0 / b };
+      }
+    }
+  }
+  if (pts.length >= 1 && zero !== null) {
+    const t = pts.reduce((best, p) => (Math.abs(p.c - zero) > Math.abs(best.c - zero) ? p : best), pts[0]!);
+    if (t.c !== zero && t.v !== 0) {
+      const b = t.v / (t.c - zero);
+      return { value: (c) => (c - zero) * b, zeroCoord: zero };
+    }
+  }
+  return null;
+}
+
+/**
+ * Bar styling from pixels. Gap: 1 - bar thickness / pitch from the (cross-axis) box widths. Corner radius: how many rows
+ * it takes for the left edge of a tall bar to reach full width at its top, relative to the bar width (0 = sharp).
+ */
+function measureBarStyle(crop: PixelBuffer, rects: (PixelRect | null)[], fills: (RGB | null)[], marks: (Mark | null)[], vertical: boolean): { barGapRatio: number | null; barRadiusRatio: number | null } {
+  const ok = rects.map((r, i) => (r ? { r, i } : null)).filter((x): x is { r: PixelRect; i: number } => x !== null);
+  let gap: number | null = null;
+  if (ok.length >= 2) {
+    const centre = (r: PixelRect) => (vertical ? r.x + r.width / 2 : r.y + r.height / 2);
+    const thick = (r: PixelRect) => (vertical ? r.width : r.height);
+    const pitch = median(ok.slice(1).map((o, k) => Math.abs(centre(o.r) - centre(ok[k]!.r))));
+    if (pitch > 0) gap = Math.round(Math.min(0.9, Math.max(0, 1 - median(ok.map((o) => thick(o.r))) / pitch)) * 100) / 100;
+  }
+
+  let radius: number | null = null;
+  if (vertical) {
+    const tall = ok.find((o) => fills[o.i] && marks[o.i] && marks[o.i]!.far - marks[o.i]!.near >= 24 && o.r.width >= 12);
+    if (tall) {
+      const fill = fills[tall.i]!;
+      const top = Math.round(marks[tall.i]!.near);
+      const y0 = Math.min(crop.height - 1, top + Math.max(2, Math.round((marks[tall.i]!.far - marks[tall.i]!.near) * 0.5)));
+      const edgeAt = (y: number): number | null => {
+        for (let x = Math.max(0, tall.r.x - 3); x < Math.min(crop.width, tall.r.x + tall.r.width / 2); x++) {
+          const p = at(crop, x, y);
+          if (p && rgbDistance(p, fill) < NOT_FILL_DISTANCE) return x;
+        }
+        return null;
+      };
+      const fullEdge = edgeAt(y0);
+      if (fullEdge !== null) {
+        const maxRows = Math.min(24, Math.floor(tall.r.width / 2));
+        let rows = 0;
+        for (let r = 0; r < maxRows; r++) {
+          const e = edgeAt(top + r);
+          if (e !== null && e - fullEdge <= 0) break;
+          rows++;
+        }
+        radius = rows <= 1 ? 0 : Math.round((rows / tall.r.width) * 100) / 100;
+      }
+    }
+  }
+  return { barGapRatio: gap, barRadiusRatio: radius };
+}
+
+/**
+ * Verify and fill in values from pixel geometry, for single-series bar / horizontal-bar (bar size) and line / area (vertex
+ * height) charts with one box per label. Anything else is returned untouched.
+ *  - A null value (unreadable sliver), or any value in a chart with no printed labels, is computed from the measured
+ *    geometry using the axis scale (ticks / zero baseline) or the scale implied by the other bars, and tagged estimated.
+ *  - A printed/OCR value that disagrees with the geometry by more than 10% is replaced by the geometric value and
+ *    marked low-confidence for review (only when the scale is trustworthy: an axis, or 3+ bars that mostly agree).
  */
 export function verifyGeometry(o: GeometryOptions): GeometryResult {
   const { chart, crop, rect, full } = o;
   const series = chart.series[0];
   const boxes = chart.elementBounds;
   const type = chart.chartType;
-  if (!boxes || chart.series.length !== 1 || !series || (type !== "bar" && type !== "horizontal-bar")) return { chart, colors: [] };
-  const vertical = type === "bar";
+  const isBar = type === "bar" || type === "horizontal-bar";
+  const isLine = type === "line" || type === "area";
+  if (!boxes || chart.series.length !== 1 || !series || (!isBar && !isLine)) return { chart, colors: [] };
+  const vertical = type !== "horizontal-bar";
   const bg = parseRgb(o.background);
   const ink = parseRgb(o.ink);
 
   const colors: (string | null)[] = [];
-  const marks: (Mark | null)[] = boxes.map((box) => {
-    if (!box) {
-      colors.push(null);
-      return null;
-    }
-    const r = boxToCropRect(box, rect, full, crop.width, crop.height);
-    if (!r) {
-      colors.push(null);
-      return null;
-    }
-    const fill = medianFillColor(crop, r, bg, ink, vertical);
-    colors.push(fill ? rgbToHex(fill) : null);
+  const rects: (PixelRect | null)[] = boxes.map((box) => (box ? boxToCropRect(box, rect, full, crop.width, crop.height) : null));
+  const fills: (RGB | null)[] = rects.map((r) => (r && isBar ? medianFillColor(crop, r, bg, ink, vertical) : null));
+  fills.forEach((f) => colors.push(f ? rgbToHex(f) : null));
+  const marks: (Mark | null)[] = rects.map((r, i) => {
+    if (!r) return null;
+    if (isLine) return { near: vertical ? r.y + r.height / 2 : r.x + r.width / 2, far: vertical ? r.y + r.height / 2 : r.x + r.width / 2 };
+    const fill = fills[i];
     const ext = fill ? measureExtent(crop, r, fill, vertical) : null;
     return ext ?? (vertical ? { near: r.y, far: r.y + r.height } : { near: r.x, far: r.x + r.width });
   });
+  const barStyle = isBar ? measureBarStyle(crop, rects, fills, marks, vertical) : undefined;
 
-  // Legacy pixel-calibrated charts (local scanner) are handled by extractionToTable; only colours are taken here.
-  if (chart.axis) return { chart, colors };
+  // Legacy pixel-calibrated charts (local scanner axis) are handled by extractionToTable; only colours / style are taken here.
+  if (chart.axis) return { chart, colors, barStyle };
 
   const n = chart.labels.length;
   const values = [...series.values];
@@ -214,20 +297,16 @@ export function verifyGeometry(o: GeometryOptions): GeometryResult {
   const printed = series.valueSource === "printed";
   let changed = false;
 
-  const ax = chart.axisScale;
-  const axisDim = vertical ? full.height : full.width;
-  const axisOffset = vertical ? rect.y : rect.x;
-  const zeroPx = ax?.zeroBaselineCoord == null ? null : (ax.zeroBaselineCoord / 1000) * axisDim - axisOffset;
-  const topPx = ax?.topTickCoord == null ? null : (ax.topTickCoord / 1000) * axisDim - axisOffset;
-  const topValue = ax?.topTickValue ?? null;
-  const axisK = zeroPx !== null && topPx !== null && topValue !== null && topValue !== 0 && zeroPx !== topPx ? topValue / (vertical ? zeroPx - topPx : topPx - zeroPx) : null;
+  const map = buildAxisMap(chart.axisScale, vertical ? full.height : full.width, vertical ? rect.y : rect.x);
 
-  // Size of each bar in px (always >= 0) and, with an axis, its signed value-per-k distance from the zero baseline.
-  const size = marks.map((m) => (m ? Math.max(1, m.far - m.near) : null));
-  const signed = marks.map((m) => {
-    if (!m || zeroPx === null) return null;
-    const tip = Math.abs(m.near - zeroPx) >= Math.abs(m.far - zeroPx) ? m.near : m.far;
-    return vertical ? zeroPx - tip : tip - zeroPx;
+  // Bars: the end of the bar farther from the zero line carries the value. Line vertices: their own coordinate.
+  const size = marks.map((m) => (m && isBar ? Math.max(1, m.far - m.near) : m ? 1 : null));
+  const fromAxis = marks.map((m) => {
+    if (!m || !map) return null;
+    if (isLine) return map.value(m.near);
+    const z = map.zeroCoord ?? (vertical ? m.far : m.near);
+    const tip = Math.abs(m.near - z) >= Math.abs(m.far - z) ? m.near : m.far;
+    return map.value(tip);
   });
 
   const apply = (i: number, v: number, lowConf: boolean) => {
@@ -236,17 +315,18 @@ export function verifyGeometry(o: GeometryOptions): GeometryResult {
     else est[i] = true;
     changed = true;
   };
+  const differs = (v: number, d: number) => Math.abs(v - d) / Math.max(Math.abs(d), 1e-9) > CONTRADICTION_RATIO;
 
-  if (axisK !== null) {
+  if (map) {
     // Axis-calibrated: the scale is known, so geometry fills gaps and checks every printed number.
     marks.forEach((m, i) => {
-      if (!m || signed[i] === null) return;
-      const d = signed[i]! * axisK;
+      const d = fromAxis[i];
+      if (!m || d === null || d === undefined) return;
       const v = values[i];
       if (v === null || v === undefined || !printed) apply(i, d, false);
-      else if (size[i]! >= MIN_ADJUDICATE_PX && Math.abs(v - d) / Math.max(Math.abs(d), 1e-9) > CONTRADICTION_RATIO) apply(i, d, true);
+      else if (size[i]! >= (isBar ? MIN_ADJUDICATE_PX : 0) && differs(v, d)) apply(i, d, true);
     });
-  } else {
+  } else if (isBar) {
     const anchors = values.map((v, i) => (v !== null && v !== undefined && v !== 0 && size[i] !== null && size[i]! >= MIN_ADJUDICATE_PX ? { i, ratio: Math.abs(v) / size[i]! } : null)).filter((a): a is { i: number; ratio: number } => a !== null);
     if (anchors.length > 0) {
       const k = median(anchors.map((a) => a.ratio));
@@ -256,7 +336,7 @@ export function verifyGeometry(o: GeometryOptions): GeometryResult {
         if ((v === null || v === undefined) && size[i] !== null) apply(i, size[i]! * k, false);
       });
       // Contradictions: only with 3+ anchors that mostly agree.
-      const inliers = anchors.filter((a) => Math.abs(a.ratio - k) / k <= CONTRADICTION_RATIO);
+      const inliers = anchors.filter((a) => !differs(a.ratio, k));
       if (anchors.length >= 3 && inliers.length / anchors.length >= MIN_INLIER_SHARE) {
         for (const a of anchors) if (!inliers.includes(a)) apply(a.i, sign(a.i) * size[a.i]! * k, true);
       }
@@ -269,10 +349,11 @@ export function verifyGeometry(o: GeometryOptions): GeometryResult {
     }
   }
 
-  if (!changed) return { chart, colors };
+  if (!changed) return { chart, colors, barStyle };
   const allFlagged = values.every((v, i) => v === null || v === undefined || est[i] === true || printed);
   return {
     chart: { ...chart, series: [{ ...series, values, estimated: est, confidences: conf, valueSource: allFlagged ? "printed" : series.valueSource }] },
     colors,
+    barStyle,
   };
 }

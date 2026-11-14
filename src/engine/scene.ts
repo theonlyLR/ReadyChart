@@ -22,7 +22,7 @@ function textBlock(b: TextBlock, fill: string): SceneNode[] {
     fontSize: b.fontSize,
     fontWeight: b.fontWeight,
     fill,
-    anchor: "start" as const,
+    anchor: b.anchor,
   }));
 }
 

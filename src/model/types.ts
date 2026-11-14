@@ -1,6 +1,8 @@
 export type ChartType = "bar" | "horizontal-bar" | "stacked-bar" | "line" | "area" | "pie" | "donut";
 export type CellProvenance = "USER_INPUT" | "PARSED" | "OCR_EXACT" | "AXIS_MEASURED" | "LOW_CONFIDENCE" | "ESTIMATED" | "MISSING";
 export type AspectPreset = "16:9" | "4:5" | "9:16" | "1:1" | "custom";
+export type TitleAlign = "left" | "center";
+export type LegendPosition = "top" | "bottom" | "hidden";
 export type DataLabelPosition = "outside-top" | "inside-top" | "inside-bottom";
 export type ContrastBackdrop = "none" | "frosted-pill" | "auto-invert";
 export type FontFamilyId = "inter" | "lora" | "space-grotesk" | "custom";
@@ -36,6 +38,10 @@ export interface ChartDocument {
     transparent: boolean;
     /** Chart text colour. null = automatic (dark or light ink chosen from the background). */
     textColor: string | null;
+    /** Title and subtitle alignment within the header area. */
+    titleAlign: TitleAlign;
+    /** Title size relative to the default (0.6..1.6). */
+    titleScale: number;
     padding: Corners;
   };
   data: {
@@ -65,6 +71,9 @@ export interface ChartDocument {
     showYAxis: boolean;
     /** Where bar value labels sit: past the bar end, or inside it at the end / at the base. */
     dataLabelPosition: DataLabelPosition;
+    legendPosition: LegendPosition;
+    /** Point markers on line / area charts. */
+    showMarkers: boolean;
     groupSmallSlicesBelowPct: number;
   };
   motion: {
