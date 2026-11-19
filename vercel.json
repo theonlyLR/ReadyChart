@@ -1,0 +1,7 @@
+{
+  "functions": { "api/**/*.ts": { "maxDuration": 30 } },
+  "rewrites": [
+    { "source": "/api/scan-chart/status", "destination": "/api/scan-chart" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}

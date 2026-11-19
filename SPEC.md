@@ -100,3 +100,25 @@ Clicking Export opens a preview modal running on the exact offscreen export pipe
 - Milestone 2 (Deterministic Motion & Animated Export): computeFrameState(doc, timeMs) supporting cubic-bezier + damped harmonic spring physics, multi-track choreography (grid -> bars -> number roll-up), interactive timeline scrubber, and WebWorker streaming GIF + Animated WebP export.
 - Milestone 3 (Brand Kit & Direct Canvas Sculpting): Logo upload with luminance contrast badge + safe-zone margin avoidance, localStorage Brand Kit presets, inline text editing, and drag-on-canvas bar/point value sculpting.
 - Milestone 4 (Screenshot-to-Chart & Smart Text Ingestion): Zero-modal Cmd+V / drag-and-drop ingestion, deterministic table/text parser, multi-provider Vision extraction (/api/scan-chart dev proxy) with auto-crop and pixel-sampled colours, full visual reconstruction, Compare Original onion-skin overlay. Later: Visual Self-Refine loop and RFC 6902 natural-language style tweaks.
+- Milestone 5A (Production Deployment & Serverless Vision API): the app ships as a static Vite SPA on Vercel while `/api/scan-chart` and `/api/refine-chart` run as Vercel Serverless Functions. See Section 6.
+
+## 6. Production Deployment (Milestone 5A)
+Architecture: one framework-agnostic core, two thin adapters, zero duplicated logic.
+- `server/scanCore.ts`: provider requests (Gemini model cascade with fast failover, Anthropic, OpenAI), timeouts, JSON extraction, `handleScan`, `handleRefine`, and `handleApi`, which applies the guards below. Takes a parsed request plus an env object; imports no framework.
+- `server/nodeAdapter.ts`: the Node `IncomingMessage`/`ServerResponse` bridge (body read with an early size abort, Cancel to `AbortSignal`, JSON reply).
+- `server/scanProxy.ts`: Vite dev/preview middleware (`npm run dev`, `vite preview`); guards are off and the body cap stays 32 MB, so local behaviour is unchanged.
+- `api/scan-chart.ts`, `api/refine-chart.ts`: Vercel Functions that pass `process.env` to the same core. Guards are on when `NODE_ENV=production`.
+- `vercel.json`: `maxDuration: 30` for `api/**/*.ts`; `/api/scan-chart/status` is rewritten to the scan function (the client's `probeProxy` call); every other non-`/api/` path rewrites to `/index.html` for the SPA.
+
+Guards (production), in order: (1) `GET` on the scan route is the status probe and returns `{ configured }` (provider name only, never a key); (2) any non-POST method returns 405 with `Allow: POST`; (3) body over 6 MB returns 413; (4) `Origin` (else `Referer`) must match the request host (`x-forwarded-host` / `host`) or an entry of `ALLOWED_ORIGINS`, otherwise 403 (a request with neither header is rejected); (5) an in-memory sliding window allows 15 requests per 60 s per client IP (first `x-forwarded-for` hop), per route, otherwise 429 `rate_limited` with `Retry-After`. The window is per warm function instance, so it is best-effort abuse protection, not a global quota. The client scanner treats every non-OK reply as "use the on-device scan", so each guard degrades gracefully. Provider errors are logged with the key redacted; keys never appear in responses.
+
+Note: Vercel itself caps Function request bodies at 4.5 MB, so on Vercel the effective limit is lower than the 6 MB guard (the platform rejects first and the client falls back).
+
+Environment variables (Vercel Project Settings, or `.env.local` locally):
+| Variable | Purpose |
+|---|---|
+| `GEMINI_API_KEY` | Preferred provider (Gemini > Anthropic > OpenAI) |
+| `ANTHROPIC_API_KEY` | Anthropic vision fallback |
+| `OPENAI_API_KEY` | OpenAI vision fallback |
+| `GEMINI_MODEL` / `ANTHROPIC_MODEL` / `OPENAI_MODEL` | Optional pin; `GEMINI_MODEL` replaces the Gemini cascade (and the refine model) |
+| `ALLOWED_ORIGINS` | Comma-separated extra origins or hosts allowed to call the API (same-host is always allowed) |

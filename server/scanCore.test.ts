@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { GEMINI_MODELS, GEMINI_TIMEOUT_MS, REFINE_PROMPT, REFINE_TIMEOUT_MS, extractPatch, handleRefine, cachedGeminiModel, configuredProvider, handleScan, resetGeminiRoutes, resolveCredentials } from "./scanProxy.ts";
+import { PROD_MAX_BODY_BYTES, createRateLimiter, handleApi, isOriginAllowed, redact, GEMINI_MODELS, GEMINI_TIMEOUT_MS, REFINE_PROMPT, REFINE_TIMEOUT_MS, extractPatch, handleRefine, cachedGeminiModel, configuredProvider, handleScan, resetGeminiRoutes, resolveCredentials } from "./scanCore.ts";
 
 const body = JSON.stringify({ image: "AAAA", mimeType: "image/png", hints: { width: 10, height: 10, colors: ["#112233"] } });
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
@@ -274,5 +274,103 @@ describe("POST /api/refine-chart (handleRefine)", () => {
     expect(await handleRefine({ body: rbody, headers: {} }, { GEMINI_API_KEY: "g-secret" }, vi.fn().mockResolvedValue(gem("no json here")) as unknown as typeof fetch)).toMatchObject({ status: 502, body: { error: { code: "bad_json" } } });
     expect(err.mock.calls.join(" ")).not.toContain("g-secret");
     err.mockRestore();
+  });
+});
+
+describe("production guards (handleApi)", () => {
+  const ENV = { GEMINI_API_KEY: "g-secret-key" };
+  const ok = () => vi.fn().mockImplementation(async () => json({ candidates: [{ content: { parts: [{ text: JSON.stringify(REPLY) }] } }] }));
+  const same = { origin: "https://app.example.com", host: "app.example.com" };
+  const post = (over: Partial<Parameters<typeof handleApi>[1]> = {}) => ({ method: "POST", headers: same, body, bodyBytes: body.length, ip: "1.1.1.1", ...over });
+
+  it("answers GET status with the configured provider, never the key", async () => {
+    const r = await handleApi("scan", post({ method: "GET", body: null, bodyBytes: 0 }), ENV, { enforce: true });
+    expect(r).toEqual({ status: 200, body: { configured: "gemini" } });
+  });
+  it("rejects non-POST methods with 405 and Allow", async () => {
+    const r = await handleApi("scan", post({ method: "PUT" }), ENV, { enforce: true });
+    expect(r.status).toBe(405);
+    expect(r.headers).toEqual({ allow: "POST" });
+    expect((await handleApi("refine", post({ method: "GET" }), ENV, { enforce: true })).status).toBe(405);
+  });
+  it("returns 413 over 6 MB (or an aborted read) and passes just under it", async () => {
+    const f = ok();
+    expect((await handleApi("scan", post({ bodyBytes: PROD_MAX_BODY_BYTES + 1 }), ENV, { enforce: true, fetchImpl: f })).status).toBe(413);
+    expect((await handleApi("scan", post({ body: null }), ENV, { enforce: true, fetchImpl: f })).status).toBe(413);
+    expect(f).not.toHaveBeenCalled();
+    expect((await handleApi("scan", post({ bodyBytes: PROD_MAX_BODY_BYTES }), ENV, { enforce: true, fetchImpl: f })).status).toBe(200);
+  });
+  it("blocks cross-site and header-less requests with 403, before any provider call", async () => {
+    const f = ok();
+    const evil = await handleApi("scan", post({ headers: { origin: "https://evil.example", host: "app.example.com" } }), ENV, { enforce: true, fetchImpl: f });
+    expect(evil.status).toBe(403);
+    expect(evil.body).toMatchObject({ error: { code: "forbidden" } });
+    expect((await handleApi("scan", post({ headers: { host: "app.example.com" } }), ENV, { enforce: true, fetchImpl: f })).status).toBe(403);
+    expect(f).not.toHaveBeenCalled();
+  });
+  it("skips origin and rate guards when enforce is off (local dev)", async () => {
+    const f = ok();
+    const limiter = createRateLimiter(1);
+    for (let i = 0; i < 3; i++) expect((await handleApi("scan", post({ headers: {} }), ENV, { enforce: false, fetchImpl: f, limiter })).status).toBe(200);
+  });
+
+  describe("isOriginAllowed", () => {
+    it("allows same host via Host, x-forwarded-host and the Referer fallback", () => {
+      expect(isOriginAllowed({ origin: "https://app.example.com", host: "app.example.com" }, undefined)).toBe(true);
+      expect(isOriginAllowed({ origin: "https://app.example.com", host: "internal:3000", "x-forwarded-host": "app.example.com" }, undefined)).toBe(true);
+      expect(isOriginAllowed({ referer: "https://app.example.com/studio?x=1", host: "app.example.com" }, undefined)).toBe(true);
+    });
+    it("honours comma-separated ALLOWED_ORIGINS as origins or bare hosts", () => {
+      const allowed = "https://a.example.com, b.example.com/ ,http://localhost:5173";
+      expect(isOriginAllowed({ origin: "https://a.example.com", host: "x" }, allowed)).toBe(true);
+      expect(isOriginAllowed({ origin: "https://b.example.com", host: "x" }, allowed)).toBe(true);
+      expect(isOriginAllowed({ origin: "http://localhost:5173", host: "x" }, allowed)).toBe(true);
+      expect(isOriginAllowed({ origin: "https://c.example.com", host: "x" }, allowed)).toBe(false);
+      expect(isOriginAllowed({ origin: "http://a.example.com", host: "x" }, "https://a.example.com")).toBe(false);
+    });
+    it("rejects missing, null and malformed origins", () => {
+      expect(isOriginAllowed({ host: "app.example.com" }, undefined)).toBe(false);
+      expect(isOriginAllowed({ origin: "null", host: "null" }, undefined)).toBe(false);
+      expect(isOriginAllowed({ origin: "not a url", host: "app.example.com" }, undefined)).toBe(false);
+    });
+  });
+
+  describe("rate limiter", () => {
+    it("allows 15 per minute per IP, then 429 with Retry-After, and slides", async () => {
+      let t = 0;
+      const limiter = createRateLimiter(15, 60_000, () => t);
+      const f = ok();
+      const run = (ip = "9.9.9.9", route: "scan" | "refine" = "scan") => handleApi(route, post({ ip }), ENV, { enforce: true, fetchImpl: f, limiter });
+      for (let i = 0; i < 15; i++) {
+        t = i * 1000;
+        expect((await run()).status).toBe(200);
+      }
+      t = 20_000;
+      const blocked = await run();
+      expect(blocked.status).toBe(429);
+      expect(blocked.body).toMatchObject({ error: { code: "rate_limited" } });
+      expect(blocked.headers).toEqual({ "retry-after": "40" }); // oldest hit (t=0) leaves the window at 60 s
+      expect((await run("8.8.8.8")).status).toBe(200); // another IP is unaffected
+      expect(((await handleApi("refine", post({ ip: "9.9.9.9" }), ENV, { enforce: true, fetchImpl: f, limiter })).status)).not.toBe(429); // separate bucket
+      t = 60_001; // the t=0 hit has aged out
+      expect((await run()).status).toBe(200);
+    });
+  });
+
+  describe("key hygiene", () => {
+    it("redact removes secrets", () => {
+      expect(redact("bad key g-secret-key here", "g-secret-key")).toBe("bad key [redacted] here");
+      expect(redact("untouched", undefined, "")).toBe("untouched");
+    });
+    it("never writes the API key to the logs, even when the provider echoes it", async () => {
+      resetGeminiRoutes();
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const f = vi.fn().mockImplementation(async () => json({ error: { message: "Invalid key g-secret-key supplied" } }, 500));
+      await handleApi("scan", post(), ENV, { enforce: true, fetchImpl: f });
+      const logged = spy.mock.calls.flat().join(" ");
+      spy.mockRestore();
+      expect(logged).toContain("[scan-chart]");
+      expect(logged).not.toContain("g-secret-key");
+    });
   });
 });
